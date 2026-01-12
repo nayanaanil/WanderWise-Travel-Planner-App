@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* Premium Typography System */
+:root {
+  /* Sunset Orange Primary Color */
+  --primary: #FE4C40;
+  --primary-hover: #E63C30;
+  --primary-light: #FFF5F4;
+  
+  /* Spacing System (8pt grid) */
+  --spacing-xs: 8px;
+  --spacing-sm: 16px;
+  --spacing-md: 24px;
+  --spacing-lg: 32px;
+  --spacing-xl: 40px;
+  
+  /* Border Radius */
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  
+  /* Shadows */
+  --shadow-soft: 0 4px 16px rgba(254, 76, 64, 0.08);
+  --shadow-medium: 0 8px 24px rgba(254, 76, 64, 0.12);
+  --shadow-strong: 0 12px 32px rgba(254, 76, 64, 0.16);
+  
+  /* Shadcn UI Color Variables */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 9 100% 62%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 89%;
+  --input: 0 0% 89%;
+  --ring: 9 100% 62%;
+  --radius: 0.5rem;
+}
+
+html {
+  font-size: var(--font-size);
+}
+
+/* Hide scrollbars globally while maintaining scroll functionality */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+body {
+  overflow-x: hidden;
+}
