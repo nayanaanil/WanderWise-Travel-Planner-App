@@ -501,7 +501,7 @@ export default function LogisticsPage() {
       // Extract cities from groundRoute
       const allCities = new Set<string>();
       allCities.add(structuralRoute.outboundFlight.toCity);
-      structuralRoute.groundRoute.forEach(leg => {
+      structuralRoute.groundRoute.forEach((leg: { fromCity: string; toCity: string }) => {
         allCities.add(leg.fromCity);
         allCities.add(leg.toCity);
       });

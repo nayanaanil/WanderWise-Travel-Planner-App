@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Check, AlertCircle, Hotel, Car, Calendar, Shield, TrendingUp, Clock, ChevronRight, MessageCircle, RefreshCw } from 'lucide-react';
-import { Header } from '@/components/Header';
+import { StepHeader } from '@/components/StepHeader';
 import { BottomNav } from '@/components/BottomNav';
 import { Button } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
@@ -42,7 +42,7 @@ export function FlightConfirmationScreen({
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex flex-col pb-20">
-      <Header title="Confirmation" onBack={onBackToOptions} />
+      <StepHeader title="Confirmation" currentStep={8} totalSteps={10} onBack={onBackToOptions} />
       
       <div className="flex-1 overflow-y-auto px-4 py-6">
         {/* Header Section */}

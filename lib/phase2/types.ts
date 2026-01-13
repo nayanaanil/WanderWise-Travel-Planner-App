@@ -63,8 +63,9 @@ export interface GroundRouteResponse {
 /**
  * Phase 2 StructuralRoute (extends base with derived metadata)
  */
-export interface Phase2StructuralRoute extends Omit<StructuralRoute, 'summary' | 'itineraryImpact'> {
-  // Inherits: outboundFlight, inboundFlight, groundRoute, id
+export interface Phase2StructuralRoute extends Omit<StructuralRoute, 'summary' | 'itineraryImpact' | 'groundRoute'> {
+  // Inherits: outboundFlight, inboundFlight, id
+  groundRoute: Phase2GroundLeg[]; // Override with Phase2GroundLeg[]
   
   derived: {
     arrivalDates: Record<string, string>; // city name → ISO date
@@ -78,7 +79,7 @@ export interface Phase2StructuralRoute extends Omit<StructuralRoute, 'summary' |
 /**
  * Phase 2 GroundLeg (extends base with role)
  */
-export interface Phase2GroundLeg extends GroundLeg {
+export interface Phase2GroundLeg extends Omit<GroundLeg, 'role'> {
   role: 'TRANSFER' | 'BASE';
   mode: 'train' | 'car' | 'bus';
 }

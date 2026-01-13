@@ -6,7 +6,7 @@ import { Header } from '@/components/Header';
 import { HomeScreen } from '@/components/HomeScreen';
 import { TripSessionModal } from '@/components/TripSessionModal';
 import { Toaster } from '@/ui/sonner';
-import { getTripState, resetAllTripState } from '@/lib/tripState';
+import { getTripState, resetAllTripState, getSelectedDraftItinerary } from '@/lib/tripState';
 import { routes } from '@/lib/navigation';
 
 export default function Home() {
@@ -36,13 +36,13 @@ export default function Home() {
     // Determine where to resume based on what's been filled
     if (tripState.draftItineraries && tripState.draftItineraries.length > 0) {
       router.push(routes.plan.logistics);
-    } else if (tripState.selectedItinerary) {
+    } else if (getSelectedDraftItinerary()) {
       router.push(routes.plan.itinerary);
     } else if (tripState.pace) {
       router.push(routes.plan.processing);
     } else if (tripState.duration) {
       router.push(routes.plan.pace);
-    } else if (tripState.timing) {
+    } else if (tripState.preferredMonth) {
       router.push(routes.plan.duration);
     } else if (tripState.destination) {
       router.push(routes.plan.timing);

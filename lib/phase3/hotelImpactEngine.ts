@@ -20,7 +20,7 @@
  */
 
 import { StructuralRoute, GroundLeg } from '@/lib/route-optimizer/types';
-import { Phase2StructuralRoute } from '@/lib/phase2/types';
+import { Phase2StructuralRoute, Phase2GroundLeg } from '@/lib/phase2/types';
 import { HotelConstraint, HotelImpactResponse } from './types';
 import { ImpactCard, diffRouteToImpactCards } from '@/lib/route-optimizer/routeDiff';
 
@@ -207,7 +207,7 @@ function rebuildRouteFromVisits(
   const startDateObj = new Date(startDate + 'T00:00:00Z');
 
   // Clone baseline route
-  const newGroundRoute: GroundLeg[] = baseline.groundRoute.map(leg => ({ ...leg }));
+  const newGroundRoute: Phase2GroundLeg[] = baseline.groundRoute.map(leg => ({ ...leg }));
 
   // Only update offsets for legs that connect to/from the modified visit
   // Leg that arrives at hotel city (if not first visit)
@@ -237,10 +237,10 @@ function rebuildRouteFromVisits(
   }
 
   // Create candidate route with updated ground route
-  const candidateRouteBase: StructuralRoute = {
+  const candidateRouteBase: Phase2StructuralRoute = {
     ...baseline,
     id: `${baseline.id}-hotel-adjusted`,
-    groundRoute: newGroundRoute,
+    groundRoute: newGroundRoute as Phase2GroundLeg[],
   };
 
   // Regenerate derived fields from the visit structure and updated ground route
@@ -248,7 +248,7 @@ function rebuildRouteFromVisits(
   const derived = regenerateDerivedFields(
     baseline,
     visits,
-    newGroundRoute
+    newGroundRoute as GroundLeg[]
   );
 
   // Return Phase2StructuralRoute with regenerated derived fields
@@ -272,7 +272,7 @@ function applyAllHotelConstraints(
   hotelConstraints: HotelConstraint[]
 ): Phase2StructuralRoute | null {
   // Step 1: Build visits from route (path-scoped)
-  const visits = buildVisitsFromRoute(baseline);
+  const visits = buildVisitsFromRoute(baseline as unknown as StructuralRoute);
   const candidateVisits = structuredClone(visits);
 
   // Track which visit indices have been modified
@@ -321,7 +321,7 @@ function applyAllHotelConstraints(
   const candidateRoute = rebuildRouteFromAllVisits(baseline, candidateVisits);
 
   // Step 5: Reject any invalid downstream state (safety net)
-  const rebuiltVisits = buildVisitsFromRoute(candidateRoute);
+  const rebuiltVisits = buildVisitsFromRoute(candidateRoute as unknown as StructuralRoute);
   for (const v of rebuiltVisits) {
     if (v.departure < v.arrival) {
       return null; // Invalid route - will be caught by validation
@@ -352,7 +352,7 @@ function rebuildRouteFromAllVisits(
   const startDateObj = new Date(startDate + 'T00:00:00Z');
 
   // Build new ground route with re-derived offsets from all visits
-  const newGroundRoute: GroundLeg[] = [];
+  const newGroundRoute: Phase2GroundLeg[] = [];
 
   // Process each visit to build legs
   for (let i = 0; i < visits.length - 1; i++) {
@@ -389,10 +389,10 @@ function rebuildRouteFromAllVisits(
   }
 
   // Create candidate route with updated ground route
-  const candidateRouteBase: StructuralRoute = {
+  const candidateRouteBase: Phase2StructuralRoute = {
     ...baseline,
     id: `${baseline.id}-hotels-adjusted`,
-    groundRoute: newGroundRoute,
+    groundRoute: newGroundRoute as Phase2GroundLeg[],
   };
 
   // Regenerate derived fields from the visit structure and updated ground route

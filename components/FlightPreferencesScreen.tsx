@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plane, Clipboard, Lightbulb, Calendar, Users, AlertCircle } from 'lucide-react';
-import { Header } from '@/components/Header';
+import { StepHeader } from '@/components/StepHeader';
 import { BottomNav } from '@/components/BottomNav';
 import { Button } from '@/ui/button';
 import { Label } from '@/ui/label';
@@ -82,7 +82,7 @@ export function FlightPreferencesScreen({
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] pb-32">
-      <Header onBack={onBack} />
+      <StepHeader title="Flight Preferences" currentStep={7} totalSteps={10} onBack={onBack} />
       
       <div className="pt-16 px-6 max-w-md mx-auto">
         {/* Header Section */}

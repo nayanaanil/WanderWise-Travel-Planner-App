@@ -509,7 +509,7 @@ export default function BookingsPage() {
                 transition={{ delay: 0.3 }}
                 className="text-lg text-gray-600"
               >
-                It's time to Wander, O Wise One!
+                It&apos;s time to Wander, O Wise One!
               </motion.p>
             </motion.div>
           </motion.div>
