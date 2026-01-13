@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import { StepHeader } from '@/components/StepHeader';
@@ -26,7 +26,7 @@ import { useProcessing } from '@/lib/ProcessingContext';
  * - Mutate routes
  * - Show impact cards (navigates to impact page instead)
  */
-export default function HotelOptionsPage() {
+function HotelOptionsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { startProcessing, stopProcessing } = useProcessing();
@@ -790,6 +790,21 @@ export default function HotelOptionsPage() {
         />
       )}
     </>
+  );
+}
+
+export default function HotelOptionsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <HotelOptionsPageContent />
+    </Suspense>
   );
 }
 

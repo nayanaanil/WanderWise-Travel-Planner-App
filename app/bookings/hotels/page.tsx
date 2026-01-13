@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { getTripState, saveTripState } from '@/lib/tripState';
 import { RouteReader, type RouteStep } from '@/lib/phase2/RouteReader';
 import { Phase2StructuralRoute } from '@/lib/phase2/types';
@@ -21,7 +21,7 @@ import { routes } from '@/lib/navigation';
  * - Mutate routes
  * - Allow hotel selection
  */
-export default function HotelsLoaderPage() {
+function HotelsLoaderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -176,6 +176,21 @@ export default function HotelsLoaderPage() {
         <p className="text-gray-600">Finding hotels that fit your itinerary…</p>
       </div>
     </div>
+  );
+}
+
+export default function HotelsLoaderPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <HotelsLoaderPageContent />
+    </Suspense>
   );
 }
 

@@ -1,13 +1,13 @@
 "use client";
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { Footer } from '@/components/Footer';
 import { DurationParametersScreen } from '@/components/DurationParametersScreen';
 import { routes } from '@/lib/navigation';
 import { getTripState } from '@/lib/tripState';
 
-export default function DurationPage() {
+function DurationPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [destination, setDestination] = useState('');
@@ -53,6 +53,14 @@ export default function DurationPage() {
       </main>
       <Footer />
     </>
+  );
+}
+
+export default function DurationPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <DurationPageContent />
+    </Suspense>
   );
 }
 

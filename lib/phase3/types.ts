@@ -11,6 +11,7 @@
  */
 
 import { StructuralRoute } from '@/lib/route-optimizer/types';
+import { Phase2StructuralRoute } from '@/lib/phase2/types';
 
 export type HotelConstraint = {
   hotelId: string;
@@ -65,7 +66,7 @@ export type HotelSearchResponse = {
 
 export type HotelImpactRequest = {
   tripId: string;
-  baselineRoute: StructuralRoute;
+  baselineRoute: Phase2StructuralRoute;
   lockedHotelStays?: Array<{
     city: string;
     hotelId: string;
@@ -79,7 +80,7 @@ export type HotelImpactResponse = {
   hotel: HotelConstraint;
   baselineRouteId: string;
   candidates: Array<{
-    route: StructuralRoute;
+    route: Phase2StructuralRoute;
     impactCards: Array<import('@/lib/route-optimizer/routeDiff').ImpactCard>;
   }>;
 };

@@ -107,7 +107,7 @@ function daysBetween(date1Str: string, date2Str: string): number {
 function regenerateDerivedFields(
   baseline: Phase2StructuralRoute,
   visits: Visit[],
-  updatedGroundRoute: GroundLeg[]
+  updatedGroundRoute: Phase2GroundLeg[]
 ): Phase2StructuralRoute['derived'] {
   const startDate = baseline.outboundFlight.date;
   const inboundFlightDate = baseline.inboundFlight.date;
@@ -248,7 +248,7 @@ function rebuildRouteFromVisits(
   const derived = regenerateDerivedFields(
     baseline,
     visits,
-    newGroundRoute as GroundLeg[]
+    newGroundRoute
   );
 
   // Return Phase2StructuralRoute with regenerated derived fields

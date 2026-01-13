@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from 'next/navigation';
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, Suspense } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { StepHeader } from '@/components/StepHeader';
 import { ActivityDecisionModal } from '@/components/ActivityDecisionModal';
@@ -13,7 +13,7 @@ import { routes } from '@/lib/navigation';
 import { useProcessing } from '@/lib/ProcessingContext';
 import { rankActivities, type RankedActivity, getLabelText, getLabelBadgeClasses } from '@/lib/activities/rankActivities';
 
-export default function ActivitySelectPage() {
+function ActivitySelectPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { startProcessing, stopProcessing } = useProcessing();
@@ -416,6 +416,23 @@ export default function ActivitySelectPage() {
         isApplying={isApplying}
       />
     </>
+  );
+}
+
+export default function ActivitySelectPage() {
+  return (
+    <Suspense fallback={
+      <>
+        <StepHeader title="Select Activity" currentStep={9} totalSteps={10} onBack={() => {}} />
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <div className="text-gray-500 mb-2">Loading...</div>
+          </div>
+        </div>
+      </>
+    }>
+      <ActivitySelectPageContent />
+    </Suspense>
   );
 }
 

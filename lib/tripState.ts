@@ -530,7 +530,6 @@ export function resetAllTripState(): void {
     // Generated Activities Cache
     generatedActivitiesByCity: undefined,
     activityPrefetchStatus: 'idle', // Reset to idle, not undefined
-    dayActivities: undefined,
     
     // Flight Selection
     selectedFlights: undefined,
@@ -542,18 +541,6 @@ export function resetAllTripState(): void {
     optimizedRoute: undefined,
     baselineRoute: undefined,
     allOptimizedRoutes: undefined,
-    
-    // Timing & Preferences
-    timing: undefined,
-    preferences: undefined,
-    tripType: undefined,
-    
-    // Itinerary metadata (used for image selection)
-    experienceStyle: undefined,
-    bestFor: undefined,
-    whyThisTrip: undefined,
-    primaryCountryCode: undefined,
-    imageFolder: undefined,
   });
   
   console.log('[ResetTrip] All trip state cleared - starting fresh');
