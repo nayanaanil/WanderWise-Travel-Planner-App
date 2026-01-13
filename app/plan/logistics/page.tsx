@@ -7,6 +7,7 @@ import { Footer } from '@/components/Footer';
 import { StepHeader } from '@/components/StepHeader';
 import { routes } from '@/lib/navigation';
 import { getTripState, DraftItinerary, saveTripState } from '@/lib/tripState';
+import { getItineraryImagePath as resolveItineraryImagePath } from '@/lib/itineraryImages';
 import { MapPin, ArrowRight, Plane, Building2, Map as MapIcon, ChevronDown, ChevronUp, Train, Car, Bus, ArrowLeft, Calendar, Users, Star, ChevronRight, AlertTriangle, CheckCircle, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { RouteReader, type RouteStep } from '@/lib/phase2/RouteReader';
@@ -102,36 +103,29 @@ function generateTripSummarySentence({
  * - Allow route modifications
  */
 /**
- * Helper function to get itinerary hero image path (reused from itinerary page)
+ * Helper function to get itinerary hero image URL for logistics.
+ * Delegates to the shared Blob-backed resolver in `lib/itineraryImages.ts`.
  */
 function getItineraryImagePath(
   itinerary: DraftItinerary & { theme?: string; themeSlug?: string; primaryCountryCode?: string; imageFolder?: string },
   imageIndex: number
 ): string {
-  // Priority 1: Theme (if explicitly present)
-  if (itinerary.themeSlug) {
-    return `/itinerary-images/_themes/${itinerary.themeSlug}/${imageIndex}.jpg`;
-  }
-  if (itinerary.theme) {
-    const themeSlug = itinerary.theme.toLowerCase().replace(/\s+/g, '-');
-    return `/itinerary-images/_themes/${themeSlug}/${imageIndex}.jpg`;
-  }
-
-  // Priority 2: imageFolder (AI-selected folder)
-  if (itinerary.imageFolder) {
-    if (itinerary.imageFolder.includes('-') && itinerary.imageFolder !== '_default') {
-      return `/itinerary-images/_themes/${itinerary.imageFolder}/${imageIndex}.jpg`;
-    }
-    return `/itinerary-images/${itinerary.imageFolder}/${imageIndex}.jpg`;
-  }
-
-  // Priority 3: Country code
-  if (itinerary.primaryCountryCode) {
-    return `/itinerary-images/${itinerary.primaryCountryCode}/${imageIndex}.jpg`;
-  }
-
-  // Priority 4: Default fallback
-  return `/itinerary-images/_default/1.jpg`;
+  // Legacy filesystem-based paths (now replaced by Blob-backed itineraryImageMap):
+  // - /public/itinerary-images/_themes/${themeSlug}/${imageIndex}.jpg
+  // - /public/itinerary-images/${imageFolder}/${imageIndex}.jpg
+  // - /public/itinerary-images/${primaryCountryCode}/${imageIndex}.jpg
+  // - /public/itinerary-images/_default/1.jpg
+  //
+  // All resolution now flows through the shared image map utility.
+  return resolveItineraryImagePath(
+    {
+      themeSlug: (itinerary as any).themeSlug,
+      theme: (itinerary as any).theme,
+      imageFolder: itinerary.imageFolder,
+      primaryCountryCode: itinerary.primaryCountryCode,
+    },
+    imageIndex
+  );
 }
 
 /**
@@ -139,14 +133,20 @@ function getItineraryImagePath(
  * Uses similar logic to itinerary images but for individual cities
  */
 function getCityThumbnailPath(cityName: string, tripState: any): string {
-  // Try to get country code from destination
+  // Legacy filesystem-based thumbnails (now replaced by Blob-backed itineraryImageMap):
+  // - /public/itinerary-images/${destination.city.countryCode}/1.jpg
+  // - /public/itinerary-images/_default/1.jpg
+  //
+  // Use the shared image resolver, preferring the trip's primaryCountryCode when available.
   const destination = tripState.destination;
-  if (destination?.city?.countryCode) {
-    return `/itinerary-images/${destination.city.countryCode}/1.jpg`;
-  }
-  
-  // Fallback to default
-  return `/itinerary-images/_default/1.jpg`;
+  const primaryCountryCode = destination?.city?.countryCode;
+
+  return resolveItineraryImagePath(
+    {
+      primaryCountryCode,
+    },
+    1
+  );
 }
 
 export default function LogisticsPage() {
@@ -1286,7 +1286,7 @@ export default function LogisticsPage() {
                     className="object-cover"
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
-                      target.src = '/itinerary-images/_default/1.jpg';
+                      target.src = resolveItineraryImagePath({}, 1);
                     }}
                   />
                 </div>
@@ -1469,7 +1469,7 @@ export default function LogisticsPage() {
                 className="object-cover"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
-                  target.src = '/itinerary-images/_default/1.jpg';
+                  target.src = resolveItineraryImagePath({}, 1);
                 }}
               />
             </div>
@@ -2205,7 +2205,7 @@ export default function LogisticsPage() {
                   priority
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
-                    target.src = '/itinerary-images/_default/1.jpg';
+                    target.src = resolveItineraryImagePath({}, 1);
                   }}
                 />
                 {/* Soft internal fade at bottom of hero - blends hero → gradient surface */}

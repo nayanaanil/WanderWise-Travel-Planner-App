@@ -7,7 +7,7 @@ import { routes } from '@/lib/navigation';
 import { Sparkles, Coffee, Zap, Compass, ChevronDown, ChevronUp, MapPin, Clock, Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { StepHeader } from '@/components/StepHeader';
 import { getTripState, saveTripState, setSelectedDraftItinerary, DraftItinerary } from '@/lib/tripState';
-import { getItineraryImagePaths } from '@/lib/itineraryImages';
+import { getItineraryImagePaths, getItineraryImagePath } from '@/lib/itineraryImages';
 
 interface TripParams {
   destination: string;
@@ -27,7 +27,7 @@ interface ItineraryOptionsScreenProps {
 
 /**
  * Local Image Carousel Component
- * Displays 3 local images from /public/itinerary-images/ with navigation
+ * Displays 3 itinerary images resolved via the shared itinerary image map.
  */
 function LocalImageCarousel({ itinerary }: { itinerary: DraftItinerary }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -41,7 +41,15 @@ function LocalImageCarousel({ itinerary }: { itinerary: DraftItinerary }) {
     primaryCountryCode: itinerary.primaryCountryCode,
   }, 3);
 
-  const defaultImagePath = '/itinerary-images/_default/1.jpg';
+  const defaultImagePath = getItineraryImagePath(
+    {
+      themeSlug: (itinerary as any).themeSlug,
+      theme: (itinerary as any).theme,
+      imageFolder: itinerary.imageFolder,
+      primaryCountryCode: itinerary.primaryCountryCode,
+    },
+    1
+  );
 
   const scroll = (direction: 'left' | 'right') => {
     if (!scrollContainerRef.current) return;
@@ -89,7 +97,7 @@ function LocalImageCarousel({ itinerary }: { itinerary: DraftItinerary }) {
               loading="lazy"
               onError={(e) => {
                 console.error('[IMAGE_LOAD_ERROR]', e.currentTarget.src);
-                e.currentTarget.src = '/itinerary-images/_default/1.jpg';
+                e.currentTarget.src = defaultImagePath;
               }}
             />
           </div>

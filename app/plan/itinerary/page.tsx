@@ -196,7 +196,8 @@ export default function ItineraryPage() {
                       loading="lazy"
                       onError={(e) => {
                         console.error('[IMAGE_LOAD_ERROR]', e.currentTarget.src);
-                        e.currentTarget.src = '/itinerary-images/_default/1.jpg';
+                        // Fallback to the shared default itinerary image (Blob-backed).
+                        e.currentTarget.src = getItineraryImagePath({}, 1);
                       }}
                     />
                     {/* Subtle gradient overlay for text legibility */}

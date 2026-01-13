@@ -12,7 +12,8 @@ export function ImageWithFallback({ src, alt, className, ...rest }: ImageWithFal
 
   const handleError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     console.error('[IMAGE_LOAD_ERROR]', e.currentTarget.src);
-    e.currentTarget.src = '/itinerary-images/_default/1.jpg';
+    // Use a generic safe fallback; itinerary-specific images now resolve via itineraryImageMap.
+    e.currentTarget.src = 'https://hegvp3kaqm660g9n.public.blob.vercel-storage.com/_default1/1.jpg';
     setDidError(true);
     if (rest.onError) {
       rest.onError(e);

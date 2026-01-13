@@ -1,9 +1,11 @@
 /**
  * Itinerary Image Resolution Utilities
- * 
- * Single source of truth for resolving local image paths
- * from /public/itinerary-images/
+ *
+ * Single source of truth for resolving itinerary image URLs
+ * from the static `itineraryImageMap` (Vercel Blob URLs).
  */
+
+import { itineraryImageMap } from './itineraryImageMap';
 
 interface ItineraryImageContext {
   themeSlug?: string;
@@ -13,73 +15,69 @@ interface ItineraryImageContext {
 }
 
 /**
- * Resolve image path from itinerary metadata
- * 
- * Priority order:
- * 1. Theme slug (explicit)
- * 2. Theme (converted to slug)
- * 3. imageFolder (AI-selected, supports both country codes and theme folders)
- * 4. primaryCountryCode (legacy support)
- * 5. Default fallback
+ * Resolve image URL from itinerary metadata via itineraryImageMap.
+ *
+ * Resolution priority:
+ * 1. themeSlug → `_themes/${themeSlug}`
+ * 2. theme (converted to slug) → `_themes/${slug}`
+ * 3. imageFolder (used as-is as a key)
+ * 4. primaryCountryCode
+ * 5. `_default`
+ *
+ * The final index is clamped to the available images for the resolved key.
  */
 export function getItineraryImagePath(
   context: ItineraryImageContext,
   imageIndex: number = 1
 ): string {
-  console.log('[IMAGE_RESOLVER_INPUT]', {
+  const themeSlug = context?.themeSlug;
+  const theme = context?.theme;
+  const imageFolder = context?.imageFolder;
+  const primaryCountryCode = context?.primaryCountryCode;
+
+  // Determine the initial key based on priority
+  let resolvedKey: string;
+
+  if (themeSlug) {
+    resolvedKey = `_themes/${themeSlug}`;
+  } else if (theme) {
+    const derivedSlug = theme.toLowerCase().replace(/\s+/g, '-');
+    resolvedKey = `_themes/${derivedSlug}`;
+  } else if (imageFolder) {
+    resolvedKey = imageFolder;
+  } else if (primaryCountryCode) {
+    resolvedKey = primaryCountryCode;
+  } else {
+    resolvedKey = '_default';
+  }
+
+  let images = itineraryImageMap[resolvedKey];
+
+  // If no images for resolvedKey, fall back to _default
+  if (!images || images.length === 0) {
+    resolvedKey = '_default';
+    images = itineraryImageMap[resolvedKey] || [];
+  }
+
+  let resolvedUrl = '';
+
+  if (images && images.length > 0) {
+    // Clamp 1-based imageIndex into the valid range
+    const zeroBasedIndex = Math.max(0, imageIndex - 1);
+    const clampedIndex = Math.min(zeroBasedIndex, images.length - 1);
+    resolvedUrl = images[clampedIndex];
+  }
+
+  console.log('[IMAGE_MAP_RESOLVE]', {
+    themeSlug,
+    imageFolder,
+    primaryCountryCode,
+    resolvedKey,
     imageIndex,
-    themeSlug: context?.themeSlug,
-    theme: context?.theme,
-    imageFolder: context?.imageFolder,
-    primaryCountryCode: context?.primaryCountryCode,
+    resolvedUrl,
   });
 
-  // Priority 1: Theme slug (explicit)
-  if (context.themeSlug) {
-    const resolvedPath = `/itinerary-images/_themes/${context.themeSlug}/${imageIndex}.jpg`;
-    console.log('[IMAGE_RESOLVER_BRANCH]', 'themeSlug', context.themeSlug);
-    console.log('[IMAGE_RESOLVER_OUTPUT]', resolvedPath);
-    return resolvedPath;
-  }
-
-  // Priority 2: Theme (convert to slug format)
-  if (context.theme) {
-    const themeSlug = context.theme.toLowerCase().replace(/\s+/g, '-');
-    const resolvedPath = `/itinerary-images/_themes/${themeSlug}/${imageIndex}.jpg`;
-    console.log('[IMAGE_RESOLVER_BRANCH]', 'theme', context.theme);
-    console.log('[IMAGE_RESOLVER_OUTPUT]', resolvedPath);
-    return resolvedPath;
-  }
-
-  // Priority 3: imageFolder (AI-selected folder, handles both country codes and theme folders)
-  if (context.imageFolder) {
-    // Check if it's a theme folder (contains hyphen and is not _default)
-    if (context.imageFolder.includes('-') && context.imageFolder !== '_default') {
-      const resolvedPath = `/itinerary-images/_themes/${context.imageFolder}/${imageIndex}.jpg`;
-      console.log('[IMAGE_RESOLVER_BRANCH]', 'themeFolder', context.imageFolder);
-      console.log('[IMAGE_RESOLVER_OUTPUT]', resolvedPath);
-      return resolvedPath;
-    }
-    // Otherwise treat as country code or _default
-    const resolvedPath = `/itinerary-images/${context.imageFolder}/${imageIndex}.jpg`;
-    console.log('[IMAGE_RESOLVER_BRANCH]', 'imageFolder', context.imageFolder);
-    console.log('[IMAGE_RESOLVER_OUTPUT]', resolvedPath);
-    return resolvedPath;
-  }
-
-  // Priority 4: Country code (legacy support)
-  if (context.primaryCountryCode) {
-    const resolvedPath = `/itinerary-images/${context.primaryCountryCode}/${imageIndex}.jpg`;
-    console.log('[IMAGE_RESOLVER_BRANCH]', 'primaryCountryCode', context.primaryCountryCode);
-    console.log('[IMAGE_RESOLVER_OUTPUT]', resolvedPath);
-    return resolvedPath;
-  }
-
-  // Priority 5: Default fallback (always uses index 1)
-  const resolvedPath = `/itinerary-images/_default/1.jpg`;
-  console.log('[IMAGE_RESOLVER_BRANCH]', 'DEFAULT');
-  console.log('[IMAGE_RESOLVER_OUTPUT]', resolvedPath);
-  return resolvedPath;
+  return resolvedUrl;
 }
 
 /**
