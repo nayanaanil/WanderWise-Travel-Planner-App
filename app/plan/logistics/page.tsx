@@ -2415,11 +2415,11 @@ export default function LogisticsPage() {
           {/* LandingSection - Hero + Summary + Scroll Indicator */}
           <section 
             ref={landingSectionRef}
-            className="relative h-[calc(100dvh-120px-80px)] overflow-hidden flex flex-col"
+            className="relative h-[calc(100dvh-120px-80px)] pt-[80px] overflow-hidden flex flex-col"
           >
             {/* Hero Image */}
             {selectedDraftItinerary && (
-              <div className="relative w-full h-[40vh] overflow-hidden">
+              <div className="relative w-full h-[40dvh] overflow-hidden">
                 <Image
                   src={getItineraryImagePath(selectedDraftItinerary, 1)}
                   alt="Trip destination"
