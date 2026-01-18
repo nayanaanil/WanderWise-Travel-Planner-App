@@ -2419,28 +2419,28 @@ export default function LogisticsPage() {
           >
             {/* Hero Image */}
             {selectedDraftItinerary && (
-              <div className="relative w-full h-[40dvh] overflow-hidden">
-                <Image
-                  src={getItineraryImagePath(selectedDraftItinerary, 1)}
-                  alt="Trip destination"
-                  fill
-                  className="object-cover"
-                  priority
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    // Prevent infinite loops: if we've already tried a fallback, stop here
-                    if (target.dataset.hasTriedFallback === 'true') {
-                      console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
-                      return;
-                    }
-                    console.error('[IMAGE_LOAD_ERROR]', target.src);
-                    // Mark that we're trying a fallback BEFORE changing src
-                    target.dataset.hasTriedFallback = 'true';
-                    target.src = resolveItineraryImagePath({}, 1);
-                  }}
-                />
-                {/* Soft internal fade at bottom of hero - blends hero → gradient surface */}
-                <div className="absolute inset-x-0 bottom-0 h-[25%] bg-gradient-to-t from-orange-50 to-transparent pointer-events-none" />
+            <div className="w-full">
+              <Image
+                src={getItineraryImagePath(selectedDraftItinerary, 1)}
+                alt="Trip destination"
+                width={1200}
+                height={800}
+                priority
+                className="w-full h-auto object-contain"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  if (target.dataset.hasTriedFallback === 'true') {
+                    console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
+                    return;
+                  }
+                  console.error('[IMAGE_LOAD_ERROR]', target.src);
+                  target.dataset.hasTriedFallback = 'true';
+                  target.src = resolveItineraryImagePath({}, 1);
+                }}
+              />
+
+              {/* Soft internal fade at bottom of hero */}
+              <div className="pointer-events-none h-[25%] bg-gradient-to-t from-orange-50 to-transparent -mt-[25%]" />
             </div>
           )}
 
