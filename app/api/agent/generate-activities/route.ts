@@ -92,6 +92,7 @@ export type GenerateActivitiesRequest = {
 
 export type GenerateActivitiesResponse = {
   activities: GeneratedActivity[];
+  isFallback?: boolean; // true for fallback responses, false for AI-generated
 };
 
 // In-memory cache for generated activities
@@ -257,7 +258,7 @@ function validateActivity(activity: any, city: string): GeneratedActivity | null
 function getFallbackActivities(city: string, pace: Pace): GeneratedActivity[] {
   const cityLower = city.toLowerCase();
   
-  // Generic fallback for any city
+  // Expanded fallback activities (6-8 activities) with variety
   const genericActivities = [
     {
       name: 'City Center Walking Tour',
@@ -307,18 +308,97 @@ function getFallbackActivities(city: string, pace: Pace): GeneratedActivity[] {
       relevanceReason: 'iconic' as RelevanceReason,
       isIconic: true,
     },
+    {
+      name: 'Historic Museum or Cultural Site',
+      description: 'Discover the city\'s history and cultural heritage at a renowned museum or historic site.',
+      bestTime: ['morning', 'afternoon'] as BestTime[],
+      timingSensitivity: 'low' as TimingSensitivity,
+      timingReason: 'opening_hours' as TimingReason,
+      durationSlots: 2 as DurationSlots,
+      environment: 'indoor' as Environment,
+      crowdLevel: 'medium' as CrowdLevel,
+      physicalEffort: 'low' as PhysicalEffort,
+      interestTags: ['history', 'culture', 'education'],
+      relevanceScore: 4 as RelevanceScore,
+      relevanceReason: 'iconic' as RelevanceReason,
+      isIconic: true,
+    },
+    {
+      name: 'Evening Food District or Restaurant Street',
+      description: 'Sample local cuisine and experience the city\'s food scene in a vibrant dining area.',
+      bestTime: ['evening', 'night'] as BestTime[],
+      timingSensitivity: 'medium' as TimingSensitivity,
+      timingReason: 'opening_hours' as TimingReason,
+      durationSlots: 1 as DurationSlots,
+      environment: 'mixed' as Environment,
+      crowdLevel: 'high' as CrowdLevel,
+      physicalEffort: 'low' as PhysicalEffort,
+      interestTags: ['food', 'culture', 'nightlife'],
+      relevanceScore: 4 as RelevanceScore,
+      relevanceReason: 'iconic' as RelevanceReason,
+      isIconic: false,
+    },
+    {
+      name: 'Scenic Park or Garden',
+      description: 'Stroll through a beautiful park or garden, perfect for a relaxed break from city exploration.',
+      bestTime: ['morning', 'afternoon'] as BestTime[],
+      timingSensitivity: 'low' as TimingSensitivity,
+      timingReason: 'flexible' as TimingReason,
+      durationSlots: 1 as DurationSlots,
+      environment: 'outdoor' as Environment,
+      crowdLevel: 'low' as CrowdLevel,
+      physicalEffort: 'low' as PhysicalEffort,
+      interestTags: ['nature', 'relaxation', 'scenic'],
+      relevanceScore: 3 as RelevanceScore,
+      relevanceReason: 'good_pace_fit' as RelevanceReason,
+      isIconic: false,
+    },
+    {
+      name: 'Rooftop Bar or Observation Deck',
+      description: 'Enjoy city views and evening atmosphere from a rooftop bar or observation deck.',
+      bestTime: ['evening', 'night'] as BestTime[],
+      timingSensitivity: 'high' as TimingSensitivity,
+      timingReason: 'lighting' as TimingReason,
+      durationSlots: 1 as DurationSlots,
+      environment: 'outdoor' as Environment,
+      crowdLevel: 'medium' as CrowdLevel,
+      physicalEffort: 'low' as PhysicalEffort,
+      constraints: {
+        requiresDaylight: false,
+      },
+      interestTags: ['scenic', 'nightlife', 'social'],
+      relevanceScore: 4 as RelevanceScore,
+      relevanceReason: 'iconic' as RelevanceReason,
+      isIconic: true,
+    },
+    {
+      name: 'Art Gallery or Contemporary Space',
+      description: 'Explore local art and contemporary culture at a gallery or cultural center.',
+      bestTime: ['afternoon', 'evening'] as BestTime[],
+      timingSensitivity: 'low' as TimingSensitivity,
+      timingReason: 'flexible' as TimingReason,
+      durationSlots: 1 as DurationSlots,
+      environment: 'indoor' as Environment,
+      crowdLevel: 'low' as CrowdLevel,
+      physicalEffort: 'low' as PhysicalEffort,
+      interestTags: ['culture', 'art', 'education'],
+      relevanceScore: 3 as RelevanceScore,
+      relevanceReason: 'good_pace_fit' as RelevanceReason,
+      isIconic: false,
+    },
   ];
   
   // Validate and generate IDs for fallback activities
   const validated: GeneratedActivity[] = [];
-  for (const activity of genericActivities.slice(0, 5)) {
+  for (const activity of genericActivities) {
     const validatedActivity = validateActivity(activity, city);
     if (validatedActivity) {
       validated.push(validatedActivity);
     }
   }
   
-  return validated.length >= 3 ? validated : genericActivities.slice(0, 3).map(act => ({
+  // Return all validated activities (should be 6-8)
+  return validated.length >= 6 ? validated : validated.length > 0 ? validated : genericActivities.slice(0, 6).map(act => ({
     ...act,
     id: generateActivityId(act.name, city),
     city,
@@ -444,7 +524,7 @@ async function generateAIActivities(
     const prompt = buildPrompt(city, pace, userContext);
     
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       messages: [
         {
           role: 'system',
@@ -504,6 +584,278 @@ async function generateAIActivities(
   }
 }
 
+/**
+ * Generate a synthetic timing-constrained activity for validation
+ */
+function generateSyntheticTimingActivity(
+  city: string,
+  requiredTiming: 'morning' | 'evening',
+  pace: Pace
+): GeneratedActivity {
+  const cityLower = city.toLowerCase();
+  
+  if (requiredTiming === 'morning') {
+    // Morning timing-constrained activity (early_morning or morning, timingSensitivity !== low)
+    const morningActivities = [
+      {
+        name: 'Sunrise Viewpoint',
+        description: `Experience the city at dawn from a scenic viewpoint, best visited early to avoid crowds and capture the morning light.`,
+        bestTime: ['early_morning', 'morning'] as BestTime[],
+        timingSensitivity: 'high' as TimingSensitivity,
+        timingReason: 'lighting' as TimingReason,
+        durationSlots: 1 as DurationSlots,
+        environment: 'outdoor' as Environment,
+        crowdLevel: 'low' as CrowdLevel,
+        physicalEffort: 'low' as PhysicalEffort,
+        constraints: {
+          requiresDaylight: true,
+        },
+        interestTags: ['scenic', 'photography', 'iconic'],
+        relevanceScore: 4 as RelevanceScore,
+        relevanceReason: 'iconic' as RelevanceReason,
+        isIconic: true,
+      },
+      {
+        name: 'Morning Market Tour',
+        description: `Explore a local market at its busiest and most authentic time, when vendors are setting up and locals are shopping.`,
+        bestTime: ['early_morning', 'morning'] as BestTime[],
+        timingSensitivity: 'medium' as TimingSensitivity,
+        timingReason: 'opening_hours' as TimingReason,
+        durationSlots: 1 as DurationSlots,
+        environment: 'mixed' as Environment,
+        crowdLevel: 'medium' as CrowdLevel,
+        physicalEffort: 'low' as PhysicalEffort,
+        interestTags: ['culture', 'food', 'local'],
+        relevanceScore: 4 as RelevanceScore,
+        relevanceReason: 'iconic' as RelevanceReason,
+        isIconic: true,
+      },
+      {
+        name: 'Temple or Cathedral Visit',
+        description: `Visit a historic religious site during quiet morning hours before tourist crowds arrive.`,
+        bestTime: ['early_morning', 'morning'] as BestTime[],
+        timingSensitivity: 'medium' as TimingSensitivity,
+        timingReason: 'crowds' as TimingReason,
+        durationSlots: 1 as DurationSlots,
+        environment: 'indoor' as Environment,
+        crowdLevel: 'low' as CrowdLevel,
+        physicalEffort: 'low' as PhysicalEffort,
+        interestTags: ['history', 'culture', 'architecture'],
+        relevanceScore: 4 as RelevanceScore,
+        relevanceReason: 'iconic' as RelevanceReason,
+        isIconic: true,
+      },
+    ];
+    
+    // Select based on city characteristics
+    const selected = cityLower.includes('temple') || cityLower.includes('cathedral') || cityLower.includes('church')
+      ? morningActivities[2]
+      : cityLower.includes('market') || cityLower.includes('bazaar')
+      ? morningActivities[1]
+      : morningActivities[0];
+    
+    const validated = validateActivity(selected, city);
+    if (validated) {
+      return validated;
+    }
+    
+    // Fallback if validation fails - try all morning activities
+    for (const activity of morningActivities) {
+      const fallbackValidated = validateActivity(activity, city);
+      if (fallbackValidated) {
+        return fallbackValidated;
+      }
+    }
+    
+    // Ultimate fallback - create a minimal valid activity
+    const id = generateActivityId('Morning Experience', city);
+    return {
+      id,
+      city,
+      name: 'Morning Experience',
+      description: `Start your day with an early morning activity in ${city}.`,
+      bestTime: ['early_morning', 'morning'],
+      timingSensitivity: 'medium',
+      timingReason: 'crowds',
+      durationSlots: 1,
+      environment: 'outdoor',
+      crowdLevel: 'low',
+      physicalEffort: 'low',
+      constraints: {},
+      interestTags: ['iconic', 'culture'],
+      relevanceScore: 4,
+      relevanceReason: 'iconic',
+      isIconic: true,
+      tags: {
+        bestTime: ['early_morning', 'morning'],
+        durationSlots: 1,
+        vibe: 'cultural',
+        crowdLevel: 'low',
+      },
+    };
+  } else {
+    // Evening/night timing-constrained activity
+    const eveningActivities = [
+      {
+        name: 'Sunset Rooftop Experience',
+        description: `Enjoy panoramic city views and evening atmosphere from a rooftop bar or observation deck, best during sunset hours.`,
+        bestTime: ['evening', 'night'] as BestTime[],
+        timingSensitivity: 'high' as TimingSensitivity,
+        timingReason: 'lighting' as TimingReason,
+        durationSlots: 1 as DurationSlots,
+        environment: 'outdoor' as Environment,
+        crowdLevel: 'medium' as CrowdLevel,
+        physicalEffort: 'low' as PhysicalEffort,
+        constraints: {
+          requiresDaylight: false,
+        },
+        interestTags: ['scenic', 'nightlife', 'iconic'],
+        relevanceScore: 4 as RelevanceScore,
+        relevanceReason: 'iconic' as RelevanceReason,
+        isIconic: true,
+      },
+      {
+        name: 'Evening River or Harbor Cruise',
+        description: `Take a scenic cruise during golden hour or after dark to see the city from the water with evening lighting.`,
+        bestTime: ['evening', 'night'] as BestTime[],
+        timingSensitivity: 'high' as TimingSensitivity,
+        timingReason: 'lighting' as TimingReason,
+        durationSlots: 1 as DurationSlots,
+        environment: 'outdoor' as Environment,
+        crowdLevel: 'medium' as CrowdLevel,
+        physicalEffort: 'low' as PhysicalEffort,
+        constraints: {
+          requiresDaylight: false,
+        },
+        interestTags: ['scenic', 'romantic', 'iconic'],
+        relevanceScore: 4 as RelevanceScore,
+        relevanceReason: 'iconic' as RelevanceReason,
+        isIconic: true,
+      },
+      {
+        name: 'Night Market or Evening Food Tour',
+        description: `Experience local nightlife and cuisine at a night market or evening food district when it comes alive.`,
+        bestTime: ['evening', 'night'] as BestTime[],
+        timingSensitivity: 'medium' as TimingSensitivity,
+        timingReason: 'opening_hours' as TimingReason,
+        durationSlots: 1 as DurationSlots,
+        environment: 'mixed' as Environment,
+        crowdLevel: 'high' as CrowdLevel,
+        physicalEffort: 'low' as PhysicalEffort,
+        interestTags: ['food', 'culture', 'nightlife'],
+        relevanceScore: 4 as RelevanceScore,
+        relevanceReason: 'iconic' as RelevanceReason,
+        isIconic: true,
+      },
+    ];
+    
+    // Select based on city characteristics
+    const selected = cityLower.includes('river') || cityLower.includes('harbor') || cityLower.includes('port')
+      ? eveningActivities[1]
+      : cityLower.includes('market') || cityLower.includes('food')
+      ? eveningActivities[2]
+      : eveningActivities[0];
+    
+    const validated = validateActivity(selected, city);
+    if (validated) {
+      return validated;
+    }
+    
+    // Fallback if validation fails - try all evening activities
+    for (const activity of eveningActivities) {
+      const fallbackValidated = validateActivity(activity, city);
+      if (fallbackValidated) {
+        return fallbackValidated;
+      }
+    }
+    
+    // Ultimate fallback - create a minimal valid activity
+    const id = generateActivityId('Evening Experience', city);
+    return {
+      id,
+      city,
+      name: 'Evening Experience',
+      description: `End your day with an evening activity in ${city}.`,
+      bestTime: ['evening', 'night'],
+      timingSensitivity: 'medium',
+      timingReason: 'lighting',
+      durationSlots: 1,
+      environment: 'outdoor',
+      crowdLevel: 'medium',
+      physicalEffort: 'low',
+      constraints: {},
+      interestTags: ['iconic', 'nightlife'],
+      relevanceScore: 4,
+      relevanceReason: 'iconic',
+      isIconic: true,
+      tags: {
+        bestTime: ['evening', 'night'],
+        durationSlots: 1,
+        vibe: 'social',
+        crowdLevel: 'medium',
+      },
+    };
+  }
+}
+
+/**
+ * Post-generation validation: ensure timing-constrained activities exist
+ */
+function validateAndInjectTimingActivities(
+  activities: GeneratedActivity[],
+  city: string,
+  pace: Pace
+): GeneratedActivity[] {
+  const MAX_COUNT = 
+    pace === 'relaxed' ? 10 :
+    pace === 'packed' ? 14 :
+    12; // moderate
+  
+  // Check for morning timing-constrained activity
+  const hasMorningConstrained = activities.some(activity => {
+    const hasMorningTime = activity.bestTime.some(time => 
+      time === 'early_morning' || time === 'morning'
+    );
+    return hasMorningTime && activity.timingSensitivity !== 'low';
+  });
+  
+  // Check for evening timing-constrained activity
+  const hasEveningConstrained = activities.some(activity => {
+    const hasEveningTime = activity.bestTime.some(time => 
+      time === 'evening' || time === 'night'
+    );
+    return hasEveningTime && activity.timingSensitivity !== 'low';
+  });
+  
+  const result = [...activities];
+  
+  // Inject morning activity if missing
+  if (!hasMorningConstrained && result.length < MAX_COUNT) {
+    const syntheticMorning = generateSyntheticTimingActivity(city, 'morning', pace);
+    // Check if we already have this activity (by ID)
+    const isDuplicate = result.some(act => act.id === syntheticMorning.id);
+    
+    if (!isDuplicate) {
+      result.push(syntheticMorning);
+      console.log(`[GenerateActivities] Injected morning timing-constrained activity for ${city}`);
+    }
+  }
+  
+  // Inject evening activity if missing
+  if (!hasEveningConstrained && result.length < MAX_COUNT) {
+    const syntheticEvening = generateSyntheticTimingActivity(city, 'evening', pace);
+    // Check if we already have this activity (by ID)
+    const isDuplicate = result.some(act => act.id === syntheticEvening.id);
+    
+    if (!isDuplicate) {
+      result.push(syntheticEvening);
+      console.log(`[GenerateActivities] Injected evening timing-constrained activity for ${city}`);
+    }
+  }
+  
+  return result;
+}
+
 export async function POST(request: NextRequest) {
   let body: GenerateActivitiesRequest;
   
@@ -513,7 +865,7 @@ export async function POST(request: NextRequest) {
     console.error('[GenerateActivities] JSON parse error:', error);
     // Ultimate fallback for unparseable request
     const genericFallback = getFallbackActivities('City', 'moderate');
-    return NextResponse.json({ activities: genericFallback });
+    return NextResponse.json({ activities: genericFallback, isFallback: true });
   }
 
   try {
@@ -540,26 +892,35 @@ export async function POST(request: NextRequest) {
     // Check cache
     if (activitiesCache.has(cacheKey)) {
       const cached = activitiesCache.get(cacheKey)!;
-      return NextResponse.json({ activities: cached });
+      return NextResponse.json({ activities: cached, isFallback: false });
     }
 
     // Generate activities (with fallback)
     let activities: GeneratedActivity[];
+    let isFallback = false;
     
     const aiActivities = await generateAIActivities(body.city, body.pace, body.userContext);
     
     if (aiActivities && aiActivities.length >= 3) {
       activities = aiActivities;
+      isFallback = false;
     } else {
       // Fallback to hardcoded activities
       activities = getFallbackActivities(body.city, body.pace);
+      isFallback = true;
     }
 
-    // Cache the result
-    activitiesCache.set(cacheKey, activities);
+    // Post-generation validation: inject timing-constrained activities if missing
+    activities = validateAndInjectTimingActivities(activities, body.city, body.pace);
+
+    // Only cache AI-generated results, NOT fallback responses
+    if (!isFallback) {
+      activitiesCache.set(cacheKey, activities);
+    }
 
     const response: GenerateActivitiesResponse = {
       activities,
+      isFallback,
     };
 
     return NextResponse.json(response);
@@ -568,6 +929,6 @@ export async function POST(request: NextRequest) {
     
     // On error, return fallback activities using saved body
     const fallback = getFallbackActivities(body.city || 'City', body.pace || 'moderate');
-    return NextResponse.json({ activities: fallback });
+    return NextResponse.json({ activities: fallback, isFallback: true });
   }
 }

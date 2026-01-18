@@ -8,10 +8,15 @@ import { StepHeader } from '@/components/StepHeader';
 import { HotelImpactModal } from '@/components/HotelImpactModal';
 import { getTripState, saveTripState } from '@/lib/tripState';
 import { routes } from '@/lib/navigation';
-import { Building2, Star, CheckCircle, AlertCircle, Calendar, AlertTriangle, Info } from 'lucide-react';
+import { Building2, Star, CheckCircle, AlertCircle, Calendar, AlertTriangle, Info, Compass } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { RouteReader, type RouteStep } from '@/lib/phase2/RouteReader';
 import { Phase2StructuralRoute } from '@/lib/phase2/types';
 import { useProcessing } from '@/lib/ProcessingContext';
+import { computeHotelMeaningfulDifferencesForCity, shouldProceedWithAI, aggregateHotelTravelSignals, resolveHotelSelectionByPriority, type HotelOptionWithImpact } from '@/lib/phase3/hotelMeaningfulDifferences';
+import { HotelSearchResponse } from '@/lib/phase3/types';
+import { getEncouragementMessage, trackAgentDecisionSuccess, getAgentDecisionSuccessCount, getWatchfulMessage, shouldShowWatchfulMessage, markWatchfulMessageAsShown } from '@/lib/agentEncouragement';
+import { AgentEncouragementMessage } from '@/components/AgentEncouragementMessage';
 
 /**
  * Phase 3 Hotel Selection Page
@@ -42,6 +47,42 @@ function HotelOptionsPageContent() {
   const [impactModalData, setImpactModalData] = useState<any>(null);
   const [isApproving, setIsApproving] = useState(false);
 
+  // Hotel Priority Guidance state
+  const [hotelPriorityGuidance, setHotelPriorityGuidance] = useState<{
+    brief: string;
+    priorities: Array<{
+      id: 'fit' | 'comfort' | 'availability';
+      label: string;
+      helper: string;
+    }>;
+  } | null>(null);
+  const [selectedHotelPriority, setSelectedHotelPriority] = useState<'fit' | 'comfort' | 'availability' | null>(null);
+  const [showPriorityGuidance, setShowPriorityGuidance] = useState(false);
+  const [agentResolvedHotelSelection, setAgentResolvedHotelSelection] = useState<{
+    hotelId: string;
+    priorityUsed: 'fit' | 'comfort' | 'availability';
+  } | null>(null);
+  const [encouragementMessage, setEncouragementMessage] = useState<string | null>(null);
+  const [agentSuccessCount, setAgentSuccessCount] = useState(0);
+  const [shouldShowWatchfulMsg, setShouldShowWatchfulMsg] = useState(false);
+  
+  // Load agent success count on mount and check if watchful message should be shown
+  useEffect(() => {
+    const count = getAgentDecisionSuccessCount();
+    setAgentSuccessCount(count);
+    setShouldShowWatchfulMsg(shouldShowWatchfulMessage(count));
+    if (shouldShowWatchfulMessage(count)) {
+      markWatchfulMessageAsShown();
+    }
+  }, []);
+  
+  // Auto-show guidance when it's first loaded
+  useEffect(() => {
+    if (hotelPriorityGuidance) {
+      setShowPriorityGuidance(true);
+    }
+  }, [hotelPriorityGuidance]);
+
   useEffect(() => {
     const tripState = getTripState();
 
@@ -66,6 +107,17 @@ function HotelOptionsPageContent() {
 
     setHotelSearchResults(tripState.hotelSearchResults);
     setStructuralRoute(tripState.structuralRoute);
+    
+    // Load agent-resolved hotel selection if present
+    if (tripState.agentResolvedHotelSelection) {
+      const cityParam = searchParams.get('city');
+      const targetCity = cityParam || (tripState.hotelSearchResults?.hotelsByCity?.[0]?.city);
+      if (targetCity && tripState.agentResolvedHotelSelection[targetCity]) {
+        setAgentResolvedHotelSelection(tripState.agentResolvedHotelSelection[targetCity]);
+        // Also set the priority if we have the resolved selection
+        setSelectedHotelPriority(tripState.agentResolvedHotelSelection[targetCity].priorityUsed);
+      }
+    }
     
     // Check for booking failure context
     if (tripState.hotelBookingFailure) {
@@ -117,6 +169,287 @@ function HotelOptionsPageContent() {
     }
   };
 
+  /**
+   * Generates hotel recommendation explanation copy for the agent pick section.
+   * Template-based, no AI call.
+   */
+  const generateHotelRecommendationExplanation = (
+    priority: 'fit' | 'comfort' | 'availability',
+    hotel: any
+  ): { explanation: string; acceptedTradeoff: string } => {
+    if (priority === 'fit') {
+      const exactMatch = hotel.exactMatch !== false;
+      if (exactMatch) {
+        return {
+          explanation: 'Picked for you because you wanted minimal disruption — this hotel fits your itinerary dates perfectly with no changes needed.',
+          acceptedTradeoff: 'May have fewer room type options or slightly higher price',
+        };
+      } else {
+        return {
+          explanation: 'Picked for you because you wanted minimal disruption — this hotel requires the smallest date adjustments to fit your stay.',
+          acceptedTradeoff: 'Requires adjusting your stay dates slightly',
+        };
+      }
+    } else if (priority === 'comfort') {
+      const hasRoomTypes = hotel.availableRoomTypes && hotel.availableRoomTypes.length > 0;
+      if (hasRoomTypes) {
+        const hasSuite = hotel.availableRoomTypes.some((rt: string) =>
+          rt.toLowerCase().includes('suite') ||
+          rt.toLowerCase().includes('family') ||
+          rt.toLowerCase().includes('apartment')
+        );
+        if (hasSuite) {
+          return {
+            explanation: 'Picked for you because you wanted the best room fit — this hotel offers suites and family rooms that accommodate your group comfortably.',
+            acceptedTradeoff: 'May cost more or require date flexibility',
+          };
+        } else {
+          return {
+            explanation: 'Picked for you because you wanted the best room fit — this hotel has room types that work well for your group size.',
+            acceptedTradeoff: 'May need to book multiple rooms or adjust dates',
+          };
+        }
+      } else {
+        return {
+          explanation: 'Picked for you because you wanted the best room fit — this hotel offers the most suitable options for your group.',
+          acceptedTradeoff: 'Room type details may need confirmation at booking',
+        };
+      }
+    } else if (priority === 'availability') {
+      const confidence = hotel.availabilityConfidence || 'medium';
+      const status = hotel.availabilityStatus || 'available';
+      
+      if (confidence === 'high' && status === 'available') {
+        return {
+          explanation: 'Picked for you because you wanted booking confidence — this hotel has high availability and you can book with confidence.',
+          acceptedTradeoff: 'May have fewer amenities or less ideal location',
+        };
+      } else if (status === 'limited') {
+        return {
+          explanation: 'Picked for you because you wanted booking confidence — this hotel has the best availability among your options, though rooms are limited.',
+          acceptedTradeoff: 'Limited room selection or may need to book soon',
+        };
+      } else {
+        return {
+          explanation: 'Picked for you because you wanted booking confidence — this hotel offers the most reliable booking option available.',
+          acceptedTradeoff: 'May require booking flexibility or have fewer options',
+        };
+      }
+    }
+    
+    return {
+      explanation: 'Picked for you based on your priority.',
+      acceptedTradeoff: 'Consider your other priorities as well',
+    };
+  };
+
+  // Aggregate hotel facts for a city
+  const aggregateHotelFacts = (hotels: any[]) => {
+    const totalHotels = hotels.length;
+    
+    // Availability mix
+    const availabilityMix = {
+      available: hotels.filter(h => h.availabilityStatus === 'available').length,
+      limited: hotels.filter(h => h.availabilityStatus === 'limited').length,
+      unavailable: hotels.filter(h => h.availabilityStatus === 'unavailable').length,
+    };
+    
+    // Confidence mix
+    const confidenceMix = {
+      high: hotels.filter(h => h.availabilityConfidence === 'high').length,
+      medium: hotels.filter(h => h.availabilityConfidence === 'medium').length,
+      low: hotels.filter(h => h.availabilityConfidence === 'low').length,
+    };
+    
+    // Room type mix
+    const allRoomTypes = new Set<string>();
+    hotels.forEach(h => {
+      if (h.availableRoomTypes && h.availableRoomTypes.length > 0) {
+        h.availableRoomTypes.forEach((rt: string) => allRoomTypes.add(rt));
+      }
+    });
+    
+    const hotelsWithRoomTypes = hotels.filter(h => h.availableRoomTypes && h.availableRoomTypes.length > 0).length;
+    const hotelsWithoutRoomTypes = totalHotels - hotelsWithRoomTypes;
+    
+    // Price range
+    const prices = hotels.map(h => h.pricePerNight).filter((p): p is number => typeof p === 'number' && p > 0);
+    const priceRange = prices.length > 0 ? {
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+    } : null;
+    
+    // Exact match mix
+    const exactMatchMix = {
+      exactMatch: hotels.filter(h => h.exactMatch !== false).length,
+      requiresAdjustment: hotels.filter(h => h.exactMatch === false).length,
+    };
+    
+    return {
+      totalHotels,
+      availabilityMix,
+      confidenceMix,
+      roomTypeMix: {
+        uniqueRoomTypes: Array.from(allRoomTypes),
+        hotelsWithRoomTypes,
+        hotelsWithoutRoomTypes,
+      },
+      priceRange,
+      exactMatchMix,
+    };
+  };
+
+  // Fetch hotel priority guidance when city changes
+  useEffect(() => {
+    if (!isHydrated || !hotelSearchResults) return;
+    
+    const citiesWithStays = hotelSearchResults.hotelsByCity.filter((city: any) => city.stayWindow.nights >= 1);
+    const selectedCityData = citiesWithStays[selectedCityIndex];
+    
+    if (!selectedCityData || !selectedCityData.hotels || selectedCityData.hotels.length === 0) {
+      setHotelPriorityGuidance(null);
+      setAgentResolvedHotelSelection(null);
+      return;
+    }
+
+    try {
+      const tripState = getTripState();
+      const hotels = selectedCityData.hotels;
+      
+      // Compute meaningful differences
+      const meaningfulDifferences = computeHotelMeaningfulDifferencesForCity(
+        hotelSearchResults as HotelSearchResponse,
+        selectedCityData.city
+      );
+      
+      // Only proceed if 2+ dimensions differ
+      if (!shouldProceedWithAI(meaningfulDifferences)) {
+        setHotelPriorityGuidance(null);
+        setAgentResolvedHotelSelection(null);
+        return;
+      }
+      
+      // Aggregate hotel facts
+      const aggregatedFacts = aggregateHotelFacts(hotels);
+      
+      // Derive travel signals
+      const groupSize = (tripState.adults || 1) + (tripState.kids || 0);
+      const hotelsWithImpact: HotelOptionWithImpact[] = hotels.map((hotel: any) => ({
+        id: hotel.id,
+        exactMatch: hotel.exactMatch,
+        availableRoomTypes: hotel.availableRoomTypes,
+        availabilityStatus: hotel.availabilityStatus,
+        availabilityConfidence: hotel.availabilityConfidence,
+      }));
+      const travelSignals = aggregateHotelTravelSignals(hotelsWithImpact, groupSize);
+      
+      // Get trip context
+      const tripContext = {
+        pace: tripState.pace,
+        interests: tripState.styles,
+        travelers: {
+          adults: tripState.adults || 1,
+          kids: tripState.kids || 0,
+        },
+        tripDurationDays: tripState.structuralRoute?.derived?.totalTripDays,
+      };
+      
+      const payload = {
+        city: selectedCityData.city,
+        stayWindow: selectedCityData.stayWindow,
+        groupSize: {
+          adults: tripState.adults || 1,
+          kids: tripState.kids || 0,
+        },
+        tripContext,
+        aggregatedFacts,
+        meaningfulDifferences,
+        travelSignals,
+      };
+      
+      fetch('/api/agent/hotel-priority-guidance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+        .then(async (res) => {
+          if (!res.ok) return null;
+          return await res.json();
+        })
+        .then((data) => {
+          if (data && data.brief && typeof data.brief === 'string' && Array.isArray(data.priorities)) {
+            setHotelPriorityGuidance(data);
+          } else {
+            setHotelPriorityGuidance(null);
+          }
+        })
+        .catch((err) => {
+          console.error('[HotelPriorityGuidance] Failed to fetch guidance', err);
+          setHotelPriorityGuidance(null);
+        });
+    } catch (err) {
+      console.error('[HotelPriorityGuidance] Failed to prepare guidance payload', err);
+      setHotelPriorityGuidance(null);
+      setAgentResolvedHotelSelection(null);
+    }
+  }, [isHydrated, hotelSearchResults, selectedCityIndex]);
+
+  // Resolve hotel selection when priority is selected
+  useEffect(() => {
+    if (!selectedHotelPriority || !isHydrated || !hotelSearchResults) {
+      setAgentResolvedHotelSelection(null);
+      return;
+    }
+
+    const citiesWithStays = hotelSearchResults.hotelsByCity.filter((city: any) => city.stayWindow.nights >= 1);
+    const selectedCityData = citiesWithStays[selectedCityIndex];
+    
+    if (!selectedCityData || !selectedCityData.hotels || selectedCityData.hotels.length === 0) {
+      setAgentResolvedHotelSelection(null);
+      return;
+    }
+
+    try {
+      const tripState = getTripState();
+      const hotels = selectedCityData.hotels;
+      const groupSize = (tripState.adults || 1) + (tripState.kids || 0);
+      
+      // Convert hotels to HotelOptionWithImpact format
+      const hotelsWithImpact: HotelOptionWithImpact[] = hotels.map((hotel: any) => ({
+        id: hotel.id,
+        exactMatch: hotel.exactMatch,
+        availableRoomTypes: hotel.availableRoomTypes,
+        availabilityStatus: hotel.availabilityStatus,
+        availabilityConfidence: hotel.availabilityConfidence,
+      }));
+      
+      // Resolve hotel selection
+      const resolved = resolveHotelSelectionByPriority(
+        selectedHotelPriority,
+        hotelsWithImpact,
+        groupSize
+      );
+      
+      if (resolved) {
+        setAgentResolvedHotelSelection(resolved);
+        
+        // Store in tripState
+        const existingResolved = tripState.agentResolvedHotelSelection || {};
+        saveTripState({
+          agentResolvedHotelSelection: {
+            ...existingResolved,
+            [selectedCityData.city]: resolved,
+          },
+        });
+      } else {
+        setAgentResolvedHotelSelection(null);
+      }
+    } catch (err) {
+      console.error('[HotelResolution] Failed to resolve hotel selection', err);
+      setAgentResolvedHotelSelection(null);
+    }
+  }, [selectedHotelPriority, isHydrated, hotelSearchResults, selectedCityIndex]);
+
   // Apply hotel silently (no impact modal) when there are no changes
   const applyHotelSilently = async (impactResult: any, hotel: any, candidate: any) => {
     try {
@@ -154,6 +487,24 @@ function HotelOptionsPageContent() {
         availabilityReason: hotel.availabilityReason,
         restrictions: hotel.restrictions,
       };
+
+      // Check if user accepted agent pick
+      const isAgentPick = agentResolvedHotelSelection && 
+        agentResolvedHotelSelection.hotelId === hotel.id;
+      
+      if (isAgentPick && agentResolvedHotelSelection) {
+        // Track success and show encouragement
+        const newCount = trackAgentDecisionSuccess();
+        setAgentSuccessCount(newCount);
+        const message = getEncouragementMessage('hotel', agentResolvedHotelSelection.priorityUsed, newCount);
+        if (message) {
+          setEncouragementMessage(message);
+          // Show message briefly before navigating
+          setTimeout(() => {
+            setEncouragementMessage(null);
+          }, 3500);
+        }
+      }
 
       saveTripState({
         structuralRoute: updatedRoute,
@@ -397,6 +748,24 @@ function HotelOptionsPageContent() {
         restrictions: hotel?.restrictions,
       };
 
+      // Check if user accepted agent pick
+      const isAgentPick = agentResolvedHotelSelection && 
+        agentResolvedHotelSelection.hotelId === (hotel?.id || impactResult.hotel.hotelId);
+      
+      if (isAgentPick && agentResolvedHotelSelection) {
+        // Track success and show encouragement
+        const newCount = trackAgentDecisionSuccess();
+        setAgentSuccessCount(newCount);
+        const message = getEncouragementMessage('hotel', agentResolvedHotelSelection.priorityUsed, newCount);
+        if (message) {
+          setEncouragementMessage(message);
+          // Show message briefly before navigating
+          setTimeout(() => {
+            setEncouragementMessage(null);
+          }, 3500);
+        }
+      }
+
       // Save updated route, locked hotel stays, selected hotel
       saveTripState({
         structuralRoute: updatedRoute,
@@ -437,12 +806,15 @@ function HotelOptionsPageContent() {
 
   if (!isHydrated || !hotelSearchResults) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading hotel options...</p>
+      <>
+        <div className="fixed inset-0 bg-gray-900 -z-10" />
+        <div className="min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-gray-600">Loading hotel options...</p>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -454,6 +826,7 @@ function HotelOptionsPageContent() {
   if (citiesWithStays.length === 0) {
     return (
       <>
+        <div className="fixed inset-0 bg-gray-900 -z-10" />
         <Header />
         <main className="flex flex-col min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
           <StepHeader
@@ -494,6 +867,7 @@ function HotelOptionsPageContent() {
 
   return (
     <>
+      <div className="fixed inset-0 bg-gray-900 -z-10" />
       <Header />
       <main className="flex flex-col min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
         <StepHeader
@@ -551,7 +925,7 @@ function HotelOptionsPageContent() {
 
             {/* Stay Window */}
             {selectedCityData && (
-              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl relative">
                 <div className="flex items-center gap-2 mb-2">
                   <Calendar className="w-5 h-5 text-blue-600" />
                   <h3 className="font-semibold text-blue-900">Your stay</h3>
@@ -559,7 +933,143 @@ function HotelOptionsPageContent() {
                 <p className="text-blue-800">
                   {formatDate(selectedCityData.stayWindow.arrival)} → {formatDate(selectedCityData.stayWindow.departure)} · {selectedCityData.stayWindow.nights} {selectedCityData.stayWindow.nights === 1 ? 'night' : 'nights'}
                 </p>
+                
+                {/* Main Compass Icon - Top Right */}
+                {hotelPriorityGuidance && (
+                  <div className="absolute top-4 right-4 relative">
+                    <motion.button
+                      type="button"
+                      onClick={() => setShowPriorityGuidance(!showPriorityGuidance)}
+                      className="flex items-center justify-center cursor-pointer transition-transform hover:scale-110"
+                      aria-label="Get hotel guidance"
+                      initial={{ x: 0, y: 0, rotate: 0 }}
+                      animate={
+                        agentSuccessCount >= 2
+                          ? {
+                              scale: [1, 1.05, 1, 1.05, 1],
+                              transition: {
+                                duration: 2,
+                                repeat: Infinity,
+                                ease: "easeInOut",
+                              },
+                            }
+                          : {
+                              x: [0, -2, 2, -2, 2, -1, 1, 0],
+                              y: [0, -1, 1, -1, 1, 0],
+                              rotate: [0, -3, 3, -3, 3, 0],
+                            }
+                      }
+                      transition={
+                        agentSuccessCount >= 2
+                          ? {
+                              duration: 2,
+                              repeat: Infinity,
+                              ease: "easeInOut",
+                            }
+                          : {
+                              duration: 2,
+                              times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1],
+                              ease: "easeInOut",
+                              repeat: Infinity,
+                              repeatDelay: 1,
+                            }
+                      }
+                    >
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40">
+                        <Compass className="w-6 h-6 text-white" />
+                      </div>
+                    </motion.button>
+                    {/* Encouragement Message */}
+                    {encouragementMessage && (
+                      <AgentEncouragementMessage
+                        message={encouragementMessage}
+                        onDismiss={() => setEncouragementMessage(null)}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* Page-level Hotel Priority Guidance */}
+            {hotelPriorityGuidance && showPriorityGuidance && (
+              <section className="mb-6 p-4 rounded-xl bg-gradient-to-br from-[#FFF5F4] via-white to-[#FFF5F4] border border-[#FED7D2] shadow-sm">
+                <p className={`text-sm text-[#4B5563] ${hotelPriorityGuidance.priorities.length > 0 ? 'mb-3' : ''}`}>
+                  {hotelPriorityGuidance.brief}
+                </p>
+                {/* Watchful message after 4+ successes (once per session) */}
+                {shouldShowWatchfulMsg && (
+                  <p className="text-xs text-[#6B7280] italic mt-3 pt-3 border-t border-orange-200">
+                    {getWatchfulMessage()}
+                  </p>
+                )}
+                {/* Only render priorities if array is not empty */}
+                {hotelPriorityGuidance.priorities.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    {hotelPriorityGuidance.priorities.map((priority) => {
+                      const isSelected = selectedHotelPriority === priority.id;
+                      return (
+                        <button
+                          key={priority.id}
+                          type="button"
+                          onClick={() =>
+                            setSelectedHotelPriority(
+                              selectedHotelPriority === priority.id ? null : priority.id
+                            )
+                          }
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
+                            isSelected
+                              ? 'bg-[#FE4C40] text-white border-[#FE4C40]'
+                              : 'bg-white text-[#374151] border-[#E5E7EB] hover:border-[#FE4C40]'
+                          }`}
+                        >
+                          <div className="font-medium">{priority.label}</div>
+                          <div className="text-[11px] opacity-80">{priority.helper}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Agent Pick Section - Shows after priority is selected */}
+                {selectedHotelPriority && agentResolvedHotelSelection && (() => {
+                  const resolvedHotel = selectedCityHotels.find((h: any) => h.id === agentResolvedHotelSelection.hotelId);
+                  
+                  if (!resolvedHotel) {
+                    return null;
+                  }
+
+                  const { explanation, acceptedTradeoff } = generateHotelRecommendationExplanation(
+                    agentResolvedHotelSelection.priorityUsed,
+                    resolvedHotel
+                  );
+
+                  return (
+                    <div className="mt-4 pt-4 border-t border-orange-200">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Compass className="w-5 h-5 text-orange-500" />
+                        <h3 className="text-sm font-semibold text-[#1F2937]">WanderWise Agent Pick</h3>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 border border-orange-200 mb-3">
+                        <div className="font-medium text-[#1F2937] mb-2">{resolvedHotel.name}</div>
+                        <p className="text-sm text-[#4B5563] mb-2 leading-relaxed">
+                          {explanation}
+                        </p>
+                        <p className="text-xs text-[#6B7280] italic">
+                          Accepted tradeoff: {acceptedTradeoff}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => !loading && handleHotelClick(resolvedHotel, selectedCityData)}
+                        className="w-full px-4 py-2 bg-[#FE4C40] text-white font-medium rounded-lg hover:bg-[#E63C30] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={loading}
+                      >
+                        Select this hotel
+                      </button>
+                    </div>
+                  );
+                })()}
+              </section>
             )}
 
             {/* Hotel List */}
@@ -585,21 +1095,34 @@ function HotelOptionsPageContent() {
                   const isFailedHotel = bookingFailure && hotel.id === bookingFailure.hotelId;
                   // Check if this is an alternative hotel
                   const isAlternativeHotel = hotel.isAlternative === true;
+                  // Check if this is the agent-resolved hotel
+                  const isResolved = agentResolvedHotelSelection && hotel.id === agentResolvedHotelSelection.hotelId;
 
                   return (
                     <div key={hotel.id}>
                       <div
                         onClick={() => !loading && handleHotelClick(hotel, selectedCityData)}
-                        className={`bg-white border-2 rounded-xl p-5 shadow-sm transition-all cursor-pointer ${
+                        className={`relative border-2 rounded-xl p-5 shadow-sm transition-all cursor-pointer ${
                           loading
-                            ? 'opacity-50 cursor-not-allowed'
+                            ? 'opacity-50 cursor-not-allowed bg-white'
+                            : isResolved
+                            ? 'border-orange-300 bg-gradient-to-br from-orange-50/80 via-orange-50/60 to-orange-50/40 shadow-md ring-2 ring-orange-200/50'
                             : isFailedHotel
                             ? 'border-orange-300 bg-orange-50/30'
                             : isAlternativeHotel
                             ? 'border-blue-300 bg-blue-50/30'
-                            : 'hover:border-[#FE4C40] hover:shadow-md'
+                            : 'bg-white hover:border-[#FE4C40] hover:shadow-md'
                         }`}
                       >
+                        {/* Resolved Hotel Visual Indicator - Top Right Compass Badge */}
+                        {isResolved && (
+                          <div className="absolute top-3 right-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40">
+                              <Compass className="w-5 h-5 text-white" />
+                            </div>
+                          </div>
+                        )}
+
                         {/* Alternative Hotel Label */}
                         {isAlternativeHotel && (
                           <div className="mb-2">
@@ -623,13 +1146,21 @@ function HotelOptionsPageContent() {
                         {/* Hotel Header */}
                         <div className="flex items-start justify-between mb-3">
                           <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                              {hotel.name}
-                            </h3>
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <h3 className={`text-lg font-semibold ${isResolved ? 'text-orange-900' : 'text-gray-900'}`}>
+                                {hotel.name}
+                              </h3>
+                              {isResolved && (
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-200">
+                                  <Compass className="w-3 h-3 mr-1.5" />
+                                  Agent Pick
+                                </span>
+                              )}
+                            </div>
                           {hotel.rating && (
                             <div className="flex items-center gap-1">
                               <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                              <span className="text-sm text-gray-600">
+                              <span className={`text-sm ${isResolved ? 'text-orange-800' : 'text-gray-600'}`}>
                                 {hotel.rating.toFixed(1)}
                               </span>
                             </div>
@@ -718,22 +1249,42 @@ function HotelOptionsPageContent() {
                       <div className="flex items-end justify-between pt-3 border-t border-gray-200">
                         <div>
                           {hotel.pricePerNight && (
-                            <div className="text-sm text-gray-600">
+                            <div className={`text-sm ${isResolved ? 'text-orange-800' : 'text-gray-600'}`}>
                               ${hotel.pricePerNight.toLocaleString()}
                               <span className="text-xs">/night</span>
                             </div>
                           )}
                           {totalPrice && (
-                            <div className="text-lg font-semibold text-gray-900 mt-1">
+                            <div className={`text-lg font-semibold mt-1 ${isResolved ? 'text-orange-900' : 'text-gray-900'}`}>
                               ${totalPrice.toLocaleString()} total
                             </div>
                           )}
                         </div>
-                        <div className="text-[#FE4C40] font-medium">
-                          Select →
+                        <div className={`font-medium ${isResolved ? 'text-orange-600' : 'text-[#FE4C40]'}`}>
+                          {isResolved ? (
+                            <span className="flex items-center gap-1">
+                              <Compass className="w-4 h-4" />
+                              Agent Pick →
+                            </span>
+                          ) : (
+                            'Select →'
+                          )}
                         </div>
                       </div>
                     </div>
+
+                    {/* Resolved Hotel Confirmation Copy */}
+                    {isResolved && agentResolvedHotelSelection && (() => {
+                      const { explanation } = generateHotelRecommendationExplanation(
+                        agentResolvedHotelSelection.priorityUsed,
+                        hotel
+                      );
+                      return (
+                        <div className="mt-3 pl-3 pr-3 py-2 text-xs text-orange-700 italic border-l-2 border-orange-300 bg-orange-50/40 rounded-r">
+                          {explanation}
+                        </div>
+                      );
+                    })()}
                     
                     {/* Same Hotel Alternative Options */}
                     {isFailedHotel && bookingFailure?.alternatives?.sameHotelRoomTypes && bookingFailure.alternatives.sameHotelRoomTypes.length > 0 && (

@@ -31,6 +31,7 @@ export interface DraftItinerary {
 
 interface DraftItinerariesResponse {
   itineraries: DraftItinerary[];
+  evaluationSummary?: string;
 }
 
 /**
@@ -134,7 +135,7 @@ Do not include a preamble or follow-up text.`;
 
     // Call OpenAI
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       messages: [
         {
           role: 'system',
@@ -167,6 +168,7 @@ Do not include a preamble or follow-up text.`;
 
     // Validate response structure
     if (!parsedResponse.itineraries || !Array.isArray(parsedResponse.itineraries)) {
+      console.error('[DRAFT_API_ERROR]', 'Invalid response format: missing itineraries array');
       return NextResponse.json(
         { error: 'Invalid response format: missing itineraries array' },
         { status: 500 }
@@ -176,22 +178,82 @@ Do not include a preamble or follow-up text.`;
     // Ensure we have 1-3 itineraries
     const itineraries = parsedResponse.itineraries.slice(0, 3);
     if (itineraries.length === 0) {
+      console.error('[DRAFT_API_ERROR]', 'No itineraries generated');
       return NextResponse.json(
         { error: 'No itineraries generated' },
         { status: 500 }
       );
     }
 
+    console.log('[DRAFT_API_ITINERARIES_PARSED]', {
+      itinerariesCount: itineraries.length,
+      destination: body.destination,
+      primaryCountryCode,
+      timestamp: Date.now(),
+    });
+    
+    console.log('[DRAFT_API_ABOUT_TO_DETERMINE_IMAGE_FOLDER]', {
+      destination: body.destination,
+      primaryCountryCode,
+      hasPrimaryCountryCode: !!primaryCountryCode,
+      step: 'before image folder determination',
+    });
+
     // Determine image folder: use primaryCountryCode if available, otherwise use AI fallback
+    console.log('[DRAFT_IMAGE_FOLDER_START]', {
+      destination: body.destination,
+      primaryCountryCode,
+      hasPrimaryCountryCode: !!primaryCountryCode,
+      timestamp: Date.now(),
+      willDetermineImageFolder: true,
+    });
+    
     let imageFolder: string | undefined = primaryCountryCode;
+    let imageFolderSource: 'primaryCountryCode' | 'ai' | 'default' = primaryCountryCode ? 'primaryCountryCode' : 'default';
+    
+    console.log('[DRAFT_IMAGE_FOLDER_DECISION]', {
+      destination: body.destination,
+      primaryCountryCode,
+      hasPrimaryCountryCode: !!primaryCountryCode,
+      imageFolderBeforeAI: imageFolder,
+      willCallAI: !imageFolder,
+    });
+    
     if (!imageFolder) {
+      console.log('[DRAFT_IMAGE_FOLDER_CALLING_AI]', {
+        destination: body.destination,
+        reason: 'primaryCountryCode is undefined',
+      });
       try {
         imageFolder = await selectImageFolder(body.destination);
+        imageFolderSource = 'ai';
+        console.log('[DRAFT_IMAGE_FOLDER_AI_SELECTED]', {
+          destination: body.destination,
+          aiSelectedFolder: imageFolder,
+        });
       } catch (error) {
-        console.error('Failed to select image folder via AI, using _default:', error);
+        console.error('[DRAFT_IMAGE_FOLDER_AI_ERROR]', {
+          destination: body.destination,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
         imageFolder = '_default';
+        imageFolderSource = 'default';
       }
+    } else {
+      console.log('[DRAFT_IMAGE_FOLDER_SKIP_AI]', {
+        destination: body.destination,
+        reason: 'primaryCountryCode provided',
+        imageFolder,
+      });
     }
+    
+    console.log('[DRAFT_IMAGE_FOLDER_FINAL]', {
+      destination: body.destination,
+      primaryCountryCode,
+      imageFolder,
+      imageFolderSource,
+    });
 
     // Validate each itinerary structure and add metadata
     for (const itinerary of itineraries) {
@@ -238,10 +300,13 @@ Do not include a preamble or follow-up text.`;
       registerCoordinatesFromCities(itinerary.cities);
       
       console.log('[DRAFT_ITINERARY_CREATED]', {
+        itineraryId: itinerary.id,
         destination: itinerary.title,
         imageFolder: itinerary.imageFolder,
         primaryCountryCode: itinerary.primaryCountryCode,
+        imageFolderSource,
         citiesWithCoordinates: itinerary.cities.filter(c => c.coordinates).length,
+        cities: itinerary.cities.map(c => c.name),
       });
     }
 
@@ -273,6 +338,7 @@ Do not include a preamble or follow-up text.`;
 
     return NextResponse.json({
       itineraries,
+      evaluationSummary: parsedResponse.evaluationSummary,
     });
   } catch (error: any) {
     console.error('Error generating draft itineraries:', error);
@@ -298,21 +364,22 @@ function buildDraftItinerariesPrompt(
 ): string {
   const parts: string[] = [];
 
-  parts.push(`Generate 1-3 completely distinct draft itinerary concepts for a trip.`);
-  parts.push(`Each itinerary must have DIFFERENT city combinations, route structures, themes, and trip depth.`);
+  parts.push(`Generate 1-3 distinct draft itinerary concepts for a trip.`);
+  parts.push(`Each itinerary should feel meaningfully different in experience style, route structure, and trip depth, while remaining realistic for the user inputs.`);
 
   // USER-SELECTED LOCATIONS (MANDATORY) - Must appear before other instructions
   if ((planningMode === "manual" || planningMode === "map") && userSelectedCities && userSelectedCities.length > 0) {
-    parts.push(`\nUSER-SELECTED LOCATIONS (MANDATORY):`);
+    parts.push(`\nUSER-SELECTED LOCATIONS (HARD CONSTRAINT):`);
     parts.push(`The following cities MUST be included in every itinerary variant:`);
     userSelectedCities.forEach(city => {
       parts.push(`- ${city}`);
     });
-    parts.push(`\nYou may include additional cities if needed, but you must not omit any of the above.`);
-    parts.push(`All selected cities are hard constraints and must appear in each itinerary's cities array.`);
+    parts.push(`You must not omit any of the above cities.`);
+    parts.push(`If 1 city is selected, you may add at most 2 additional cities.`);
+    parts.push(`If 2 cities are selected, you may add at most 1 additional city.`);
   }
 
-  parts.push(`\nTrip Details:`);
+  parts.push(`\nTrip Details (MANDATORY CONTEXT):`);
   parts.push(`- Destination: ${request.destination}`);
   if (request.origin) {
     parts.push(`- Origin: ${request.origin}`);
@@ -327,15 +394,14 @@ function buildDraftItinerariesPrompt(
   if (request.interests && request.interests.length > 0) {
     parts.push(`- Interests: ${request.interests.join(', ')}`);
   }
-  if (request.mustSee && request.mustSee.length > 0) {
-    parts.push(`- Must-see items: ${request.mustSee.join(', ')}`);
-  }
   if (request.travelers?.adults) {
     parts.push(`- Travelers: ${request.travelers.adults} adult(s)`);
     if (request.travelers.kids) {
       parts.push(` and ${request.travelers.kids} kid(s)`);
     }
   }
+
+  parts.push(`\nAll provided preferences are HARD CONSTRAINTS, not optional inspiration.`);
 
   // Determine if destination is a theme or place (ephemeral classification, not persisted)
   // Check if destination looks like a theme (e.g., "African safari", "European Christmas markets")
@@ -357,88 +423,110 @@ function buildDraftItinerariesPrompt(
     parts.push(`- Infer an appropriate region and use theme keywords to determine suitable cities.`);
   }
 
+  // PERSONAL RELEVANCE
+  parts.push(`\nCORE REQUIREMENT: PERSONAL RELEVANCE`);
+  parts.push(`At least ONE itinerary MUST be the closest possible match to the user's stated pace, budget sensitivity, interests, and trip duration.`);
+  parts.push(`This itinerary should feel like the most natural fit for this user.`);
+  parts.push(`Other itineraries may explore contrasting approaches but must remain reasonable for the same user.`);
+
+  // BEST MATCH IDENTIFICATION (REQUIRED)
+  parts.push(`\nBEST MATCH IDENTIFICATION (REQUIRED):`);
+  parts.push(`Exactly ONE itinerary MUST be marked as the best match for the user.`);
+  parts.push(`This should be the itinerary that most closely aligns with the user’s stated pace, interests, budget sensitivity, and trip duration.`);
+  parts.push(`This is NOT the best overall itinerary, only the best fit for THIS user.`);
+  parts.push(`All other itineraries must be explicitly marked as not the best match.`);
+
+// DIVERSIFICATION
   parts.push(`\nDIVERSIFICATION REQUIREMENTS:`);
-  if (planningMode === "manual" && userSelectedCities && userSelectedCities.length > 0) {
-    parts.push(`You MUST generate DISTINCT options that differ in:`);
-    parts.push(`1. Route structures (linear, loop, hub-and-spoke, etc.)`);
-    parts.push(`2. Themes (culture, food, adventure, nature, photography, history, etc.)`);
-    parts.push(`3. Trip depth (nights per city, pacing)`);
-    parts.push(`Note: In manual mode, users can select a maximum of 2 cities. These selected cities must be included in every variant.`);
-    parts.push(`If only 1 city is selected, you may suggest 1 additional city. If 2 cities are selected, use only those 2 cities.`);
-  } else {
-    parts.push(`You MUST generate DISTINCT options that differ in:`);
-    parts.push(`1. City combinations (different cities or different routes)`);
-    parts.push(`2. Route structures (linear, loop, hub-and-spoke, etc.)`);
-    parts.push(`3. Themes (culture, food, adventure, nature, photography, history, etc.)`);
-    parts.push(`4. Trip depth (number of cities: 2-6, number of nights per city)`);
-  }
+  parts.push(`You MUST generate distinct options that differ in:`);
+  parts.push(`1. Route structure (linear, loop, hub-and-spoke, etc.)`);
+  parts.push(`2. Overall experience theme (culture, food, nature, photography, slow travel, etc.)`);
+  parts.push(`3. Trip depth (number of cities, nights per city, pacing)`);
 
-  parts.push(`\nDiversification Rules:`);
-  if (request.destination.toLowerCase().includes('europe') || 
-      request.destination.toLowerCase().includes('asia') ||
-      request.destination.toLowerCase().includes('india') ||
-      request.destination.toLowerCase().length > 20) {
-    parts.push(`- Destination is BROAD. Propose different REGIONS or SUB-REGIONS.`);
-    parts.push(`- Example: If "Europe", propose "Western Europe", "Eastern Europe", "Scandinavia", etc.`);
-  } else if (request.destination.split(',').length === 1 && 
-             !request.destination.toLowerCase().includes('state') &&
-             !request.destination.toLowerCase().includes('province')) {
-    parts.push(`- Destination appears to be a CITY. Propose different nearby city COMBINATIONS.`);
-    parts.push(`- Example: If "Paris", propose "Paris + Loire Valley", "Paris + Normandy", "Paris + Lyon", etc.`);
-  } else {
-    parts.push(`- Destination is a REGION or STATE. Propose different THEMATIC ROUTES within it.`);
-    parts.push(`- Example: If "Karnataka", propose "Temple Trail", "Hill Stations", "Coastal Karnataka", etc.`);
-  }
+  // PACE / BUDGET / INTEREST RULES
+  parts.push(`\nPACE, BUDGET, AND INTEREST RULES (NON-NEGOTIABLE):`);
+  parts.push(`- Relaxed pace → fewer cities, longer stays.`);
+  parts.push(`- Fast pace → more cities, shorter stays.`);
+  parts.push(`- Lower budget → simpler routes, fewer transitions.`);
+  parts.push(`- Higher budget → more variety or depth.`);
+  parts.push(`- Interests MUST visibly affect city selection, example activities, and bestFor tags.`);
+  parts.push(`If these are not reflected, the itinerary is invalid.`);
 
-  parts.push(`\nOutput Requirements:`);
-  parts.push(`- Generate 1-3 itineraries (prefer 3 if trip is 7+ days, 1-2 if shorter)`);
-  if ((planningMode === "manual" || planningMode === "map") && userSelectedCities && userSelectedCities.length > 0) {
-    parts.push(`- In manual/map mode, users can select a maximum of 2 cities. Each itinerary must respect this limit.`);
-    if (userSelectedCities.length === 1) {
-      parts.push(`- Current selection: 1 city. You may suggest 1 additional city to create a complete itinerary.`);
-    } else {
-      parts.push(`- Current selection: 2 cities. Use only these 2 cities in all itinerary variants.`);
-    }
-  } else {
-    parts.push(`- Each itinerary must have 2-6 cities depending on trip duration`);
-  }
-  parts.push(`- Assign reasonable night counts that sum to approximately ${daysDiff} nights total`);
-  parts.push(`- CRITICAL: No city should have more than 4 nights. If a trip requires more time in one location, split it across multiple cities or redistribute nights.`);
-  parts.push(`- Provide 4-6 example experiences per city to illustrate the type of experiences this version offers.`);
-  parts.push(`  These are illustrative highlights, not a fixed plan.`);
-  parts.push(`  Guidelines:`);
-  parts.push(`  - Avoid imperative verbs like "Visit", "Attend", "Tour"`);
-  parts.push(`  - Prefer descriptive nouns or phrases`);
-  parts.push(`  - Do NOT imply a schedule or sequence`);
-  parts.push(`- For each city, include coordinates (latitude and longitude) in decimal degrees.`);
-  parts.push(`  Coordinates should represent the city center.`);
-  parts.push(`  Latitude must be between -90 and 90, longitude between -180 and 180.`);
-  parts.push(`- Titles must be human-friendly (e.g., "Cultural Japan Highlights", "Eastern Europe Adventure Loop")`);
-  parts.push(`- For each itinerary, also include:`);
-  parts.push(`  1. bestFor: An array of 2-4 short tags describing who this version suits best`);
-  parts.push(`     Examples: "culture", "nature", "photography", "nightlife", "slow travel", "food"`);
-  parts.push(`     Prefer tags aligned with the user's stated interests when possible`);
-  parts.push(`  2. whyThisTrip: An array of exactly 3 short bullet points`);
-  parts.push(`     Explain what differentiates this version from the other options`);
-  parts.push(`     Focus on experience style, pace, and overall feel`);
-  parts.push(`     Do NOT mention optimization, logistics, or transport`);
-  parts.push(`  3. experienceStyle (optional but encouraged): A short descriptive phrase (6-10 words max)`);
-  parts.push(`     Example: "Quiet nature-focused Bali with coastal villages"`);
+  // EXPERIENCE TRADEOFFS
+  parts.push(`\nEXPERIENCE TRADEOFFS (REQUIRED):`);
+  parts.push(`Each itinerary MUST clearly embody at least one experiential tradeoff such as:`);
+  parts.push(`- Depth vs variety`);
+  parts.push(`- Slower immersion vs broader coverage`);
+  parts.push(`- Flexibility vs structure`);
+  parts.push(`Do NOT mention logistics, transport, pricing, or optimization.`);
 
-  parts.push(`\nDO NOT include:`);
+  // OUTPUT CONTENT RULES
+  parts.push(`\nOUTPUT CONTENT RULES:`);
+  parts.push(`- Generate 1-3 itineraries (prefer 3 if trip is 7+ days).`);
+  parts.push(`- Each itinerary must have 2-6 cities depending on trip duration.`);
+  parts.push(`- Assign reasonable night counts that sum to approximately ${daysDiff} nights total.`);
+  parts.push(`- CRITICAL: No city may have more than 4 nights.`);
+  parts.push(`- Provide 4-6 illustrative experiences per city.`);
+  parts.push(`  These are examples only, not a schedule.`);
+  parts.push(`  Avoid imperative verbs and avoid implying sequence or timing.`);
+  parts.push(`Each itinerary object MUST include a boolean field "isBestMatch".`);
+  parts.push(`Exactly one itinerary must have "isBestMatch": true.`);
+  parts.push(`All other itineraries must have "isBestMatch": false.`);
+
+  // bestFor
+  parts.push(`\nbestFor RULES:`);
+  parts.push(`- Provide 2-4 short tags per itinerary.`);
+  parts.push(`- If user interests are provided, at least ONE tag must overlap with those interests.`);
+  parts.push(`- Tags must distinguish who this itinerary suits best.`);
+
+  // whyThisTrip
+  parts.push(`\nwhyThisTrip RULES (CRITICAL):`);
+  parts.push(`Each itinerary MUST include exactly 3 bullets.`);
+  parts.push(`Each bullet MUST either:`);
+  parts.push(`- Reference at least one user input (pace, interests, duration, budget, travelers), OR`);
+  parts.push(`- Explain a clear experiential tradeoff relative to other options.`);
+  parts.push(`Do NOT restate the title or theme.`);
+  parts.push(`Do NOT mention logistics, transport, or optimization.`);
+
+  // experienceStyle
+  parts.push(`\nexperienceStyle (OPTIONAL BUT ENCOURAGED):`);
+  parts.push(`- 6-10 words describing the emotional and experiential tone.`);
+
+ // PAGE-LEVEL EVALUATION SUMMARY (REQUIRED)
+  parts.push(`\nPAGE-LEVEL EVALUATION SUMMARY (REQUIRED):`);
+  parts.push(`You MUST include a short evaluation summary explaining how these itinerary options were shaped for the user.`);
+  parts.push(`This summary must:`);
+  parts.push(`- Clearly refer to the itinerary marked with "isBestMatch": true as the one made specifically for the user.`);
+  parts.push(`- Explain what that itinerary emphasizes in plain, everyday language.`);
+  parts.push(`- Briefly explain how the other options differ.`);
+  parts.push(`- Reference at least one explicit user preference (pace, interests, budget, or duration).`);
+  parts.push(`- Be 100 words maximum.`);
+  parts.push(`- Avoid mentioning logistics, transport, pricing, optimization, or internal labels.`);
+  parts.push(`- Do NOT refer to itineraries by index or number.`);
+  parts.push(`- Write in a very casual, friendly, conversational tone, like a close friend helping you decide.`);
+  parts.push(`- Wordplay on "WanderWise" is allowed but should be subtle and not forced.`);
+  parts.push(`- Have short sentences`);
+  parts.push(`- Required tone target (implicit, enforced by rules), Second person (“you”, “your trip”), Slightly cheeky but reassuring, Sounds spoken, not analytical.`);
+  parts.push(`- Example (do not follow this example exactly): You said you want to enjoy the trip, not sprint through it, so these options reflect that. This keeps things slower and more immersive, `);
+  parts.push(`while the others squeeze in more places if you're feeling ambitious. Very WanderWise, Very future you will thank you.`);
+
+  // DO NOT INCLUDE
+  parts.push(`\nDO NOT INCLUDE:`);
   parts.push(`- Day-by-day schedules`);
   parts.push(`- Transport details`);
   parts.push(`- Flights`);
   parts.push(`- Hotels`);
   parts.push(`- Check-in/check-out times`);
-  parts.push(`- Detailed timings`);
   parts.push(`- Specific dates`);
+  parts.push(`- Detailed timings`);
 
   parts.push(`\nRespond ONLY with JSON in this EXACT structure:`);
   parts.push(`{`);
+  parts.push(`  "evaluationSummary": "2-3 sentence explanation of how WanderWise evaluated these options and which best matches the user's preferences.",`);
   parts.push(`  "itineraries": [`);
   parts.push(`    {`);
   parts.push(`      "id": "unique-id",`);
+  parts.push(`      "isBestMatch": true,`);
   parts.push(`      "title": "Human-friendly title",`);
   parts.push(`      "experienceStyle": "Short descriptive phrase",`);
   parts.push(`      "bestFor": ["tag1", "tag2", "tag3"],`);
@@ -457,7 +545,6 @@ function buildDraftItinerariesPrompt(
           parts.push(`            "Example experience 2",`);
           parts.push(`            "Example experience 3"`);
           parts.push(`          ],`);
-          parts.push(`          "coordinates": { "lat": 48.8566, "lng": 2.3522 }`);
           parts.push(`        }`);
   parts.push(`      ]`);
   parts.push(`      ${primaryCountryCode ? `"primaryCountryCode": "${primaryCountryCode}",` : ''}`);
@@ -465,10 +552,13 @@ function buildDraftItinerariesPrompt(
   parts.push(`  ]`);
   parts.push(`}`);
 
-  parts.push(`\nCRITICAL: Your response MUST be valid JSON only. No markdown, no explanations, no code blocks.`);
-  parts.push(`Ensure all strings are properly escaped and the JSON is complete and parseable.`);
-  parts.push(`Ensure each itinerary is DISTINCT from the others.`);
-
+  parts.push(`\nCRITICAL:`);
+  parts.push(`- Output valid JSON only.`);
+  parts.push(`- No markdown, no explanations.`);
+  parts.push(`- Ensure all strings are escaped and parseable.`);
+  parts.push(`- Ensure each itinerary is clearly distinct.`);
+  parts.push(`- Ensure at least one itinerary is the closest fit to the user's preferences.`);
+  
   return parts.join('\n');
 }
 
@@ -501,41 +591,98 @@ async function selectImageFolder(destination: string): Promise<string> {
     isResolvedFolderAllowed: false,
   });
 
-  const prompt = `Given a travel destination, return EXACTLY ONE image folder name from this allowed list:
+  const prompt = `You are an image folder resolver for a travel app.
 
-Country codes: ${allowedCountryCodes.join(", ")}
-Theme folders: ${allowedThemeFolders.join(", ")}
-Default: _default
+Your task is to map a destination string to EXACTLY ONE image folder
+from the allowed list below.
 
-CRITICAL RULES:
-- Return ONLY the folder name as a plain string
-- Do NOT return explanations, quotes, or extra text
-- Do NOT invent new values - only return values from the allowed list above
-- Do NOT return country names - only return country codes (e.g., "FR" not "France")
-- Do NOT return aliases - use the canonical folder names only
-- Must be an exact match from the allowed list above
-- If unsure, return "_default"
+You MUST follow the decision process in order.
+Do NOT skip steps.
 
-ALIAS MAPPINGS (apply these BEFORE choosing final answer):
-- "swiss alps" or "swiss-alps" → alpine-scenic-route
-- "mediterranean coast" or "mediterranean-coast" → mediterranean-summer
+--------------------------------
+ALLOWED OUTPUTS (ONLY THESE):
+Country codes:
+${allowedCountryCodes.join(", ")}
 
-Examples:
-Input: "European Christmas Markets" → Output: european-christmas-markets
-Input: "Scandinavia" → Output: scandinavia
-Input: "Himalayan Region" → Output: himalayas
-Input: "Himalayas" → Output: himalayas
-Input: "Greek Islands" → Output: greek-islands
-Input: "Swiss Alps" → Output: alpine-scenic-route
-Input: "Mediterranean Coast" → Output: mediterranean-summer
-Input: "Middle East luxury" → Output: middle-east-luxury
-Input: "France" → Output: FR
-Input: "Marrakech" → Output: MA
-Input: "Japan" → Output: JP
+Theme folders:
+${allowedThemeFolders.join(", ")}
 
-Destination: "${destination}"
+Default:
+_default
+--------------------------------
 
-Return only the folder name:`;
+DECISION PROCESS (MANDATORY):
+
+STEP 1 — SIGNAL EXTRACTION
+- Identify ANY country, nationality, city, region, landmark, cuisine, culture, or geography mentioned or implied.
+- Normalize adjectives to countries (e.g., "Indian" → India).
+- Normalize regions to representative countries when applicable.
+
+STEP 2 — COUNTRY MATCH (HIGHEST PRIORITY)
+- If ANY country can be reasonably inferred, return its COUNTRY CODE.
+- This includes:
+  - Cities
+  - Landmarks
+  - Cultural references
+  - Cuisine
+  - Adjectives (e.g., "Japanese", "South Indian")
+- If multiple countries are implied, choose the MOST REPRESENTATIVE one.
+
+STEP 3 — THEME MATCH
+- Only if NO country can be inferred:
+  - Match against THEME folders.
+  - Prefer specific themes over generic ones.
+
+STEP 4 — DEFAULT (LAST RESORT)
+- Return "_default" ONLY IF:
+  - No country can be inferred
+  - AND no theme can be inferred
+- If you return "_default", you must be confident that the destination is too vague.
+
+--------------------------------
+ALIAS & NORMALIZATION RULES (APPLY BEFORE FINAL DECISION):
+
+- "swiss alps" → alpine-scenic-route
+- "mediterranean coast" → mediterranean-summer
+- Any mention of "india", "indian", "south indian", "north indian" → IN
+- "taj mahal", "rajasthan", "goa", "kerala", "mumbai", "delhi" → IN
+- "bali" → ID
+- "thai", "thailand" → TH
+- "japan", "japanese" → JP
+- "france", "french" → FR
+- "spain", "spanish" → ES
+- "italy", "italian" → IT
+- "greece", "greek" → GR
+- "turkey", "turkish" → TR
+- "egypt", "egyptian" → EG
+- "morocco", "moroccan", "marrakech" → MA
+- "south america", "south american" → BR
+- "patagonia" → patagonia
+- "scandinavia" → scandinavia
+- "himalayas", "himalayan" → himalayas
+
+--------------------------------
+CRITICAL OUTPUT RULES:
+- Output EXACTLY ONE value
+- Output ONLY the folder name
+- No quotes, no punctuation, no explanation
+- Must be an EXACT match from the allowed list
+- Never invent new values
+
+--------------------------------
+EXAMPLES (CORRECT BEHAVIOR):
+
+"South Indian Temples" → IN
+"Japanese food tour" → JP
+"Nordic winter lights" → scandinavia
+"European Christmas Markets" → european-christmas-markets
+"Ancient ruins" → _default
+
+--------------------------------
+Destination:
+"${destination}"
+
+Return ONLY the folder name:`;
 
   console.log('[IMAGE_FOLDER_AI_TRIGGERED]', {
     destination,
@@ -544,7 +691,7 @@ Return only the folder name:`;
 
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       messages: [
         {
           role: 'system',
@@ -559,40 +706,56 @@ Return only the folder name:`;
       max_tokens: 50,
     });
 
-    const result = completion.choices[0]?.message?.content?.trim() || '_default';
+    const rawResult = completion.choices[0]?.message?.content?.trim() || '_default';
     
     // Remove quotes if present
-    const cleanedResult = result.replace(/^["']|["']$/g, '');
+    const cleanedResult = rawResult.replace(/^["']|["']$/g, '');
+    
+    // Normalize to uppercase for country codes (but keep themes as-is)
+    const normalizedResult = allowedCountryCodes.includes(cleanedResult.toUpperCase()) 
+      ? cleanedResult.toUpperCase() 
+      : cleanedResult;
     
     console.log('[IMAGE_FOLDER_AI_RESULT]', {
       destination,
-      aiResult: cleanedResult,
+      rawAIResult: rawResult,
+      cleanedResult,
+      normalizedResult,
+      promptUsed: prompt.substring(0, 200) + '...', // First 200 chars of prompt
     });
     
     console.log('[AI_IMAGE_MATCH_RESULT]', {
       destination,
-      aiResult: cleanedResult,
-      isAllowedCountry: allowedCountryCodes.includes(cleanedResult),
-      isAllowedTheme: allowedThemeFolders.includes(cleanedResult),
+      aiResult: normalizedResult,
+      isAllowedCountry: allowedCountryCodes.includes(normalizedResult),
+      isAllowedTheme: allowedThemeFolders.includes(normalizedResult),
+      isValid: allowedFolders.includes(normalizedResult),
     });
     
-    // Validate: must be in allowed list
-    if (allowedFolders.includes(cleanedResult)) {
-      const imageFolder = cleanedResult;
+    // Validate: must be in allowed list (use normalized result)
+    if (allowedFolders.includes(normalizedResult)) {
+      const imageFolder = normalizedResult;
       console.log('[IMAGE_FOLDER_FINAL_RESULT]', {
         destination,
         imageFolder,
+        source: 'ai_valid',
       });
       console.log('[SELECT_IMAGE_FOLDER_OUTPUT]', imageFolder);
       return imageFolder;
     }
     
     // If not in allowed list, return default
-    console.warn(`AI returned invalid folder "${cleanedResult}" for destination "${destination}", falling back to _default`);
+    console.warn('[IMAGE_FOLDER_AI_INVALID]', {
+      destination,
+      aiReturned: normalizedResult,
+      allowedFolders: allowedFolders.slice(0, 10) + '...', // Show first 10 for reference
+      reason: 'AI result not in allowed list',
+    });
     const imageFolder = '_default';
     console.log('[IMAGE_FOLDER_FINAL_RESULT]', {
       destination,
       imageFolder,
+      source: 'ai_invalid_fallback',
     });
     console.log('[SELECT_IMAGE_FOLDER_OUTPUT]', imageFolder);
     return imageFolder;

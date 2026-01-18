@@ -71,6 +71,16 @@ export interface TripState {
   planningMode?: 'auto' | 'manual' | 'map';
   userSelectedCities?: string[];
   
+  // Fast Path assumptions metadata (tracks which values were inferred, not user-provided)
+  assumed?: {
+    pace?: boolean;
+    styles?: boolean;
+    adults?: boolean;
+    kids?: boolean;
+    budget?: boolean;
+    budgetType?: boolean;
+  };
+  
   // UI State
   ui?: {
     expandedCard?: string | null;
@@ -91,8 +101,10 @@ export interface TripState {
     experienceStyle?: string; // Short descriptive phrase (6-10 words)
     bestFor?: string[]; // Array of 2-4 tags describing who this suits best
     whyThisTrip?: string[]; // Array of exactly 3 differentiating bullet points
+    isBestMatch?: boolean; // Whether this itinerary is the best match for the user
   }> | null;
   selectedDraftItineraryId?: string | null; // ID of selected draft itinerary
+  evaluationSummary?: string; // AI evaluation summary of the draft itineraries
   
   // Trip planning phase
   phase?: 'DRAFT_SELECTED' | 'FLIGHTS_LOADING' | 'FLIGHTS_SELECTING' | 'FLIGHTS_REVIEW' | 'FLIGHTS_SELECTED' | 'FLIGHTS_LOCKED' | 'ROUTE_BUILDING' | 'ROUTE_READY' | 'ROUTE_BUILT' | 'COMPLETE';
@@ -118,6 +130,17 @@ export interface TripState {
       restrictions?: string[];
     };
   };
+  
+  // Agent-Resolved Hotel Selection (per city, based on priority)
+  agentResolvedHotelSelection?: {
+    [city: string]: {
+      hotelId: string;
+      priorityUsed: 'fit' | 'comfort' | 'availability';
+    };
+  };
+  
+  // Progressive Trust: Track successful agent-assisted decisions
+  agentDecisionSuccessCount?: number; // Count of times user accepted agent picks (flights, hotels, activities)
   
   // Generated Activities Cache (per city)
   generatedActivitiesByCity?: {

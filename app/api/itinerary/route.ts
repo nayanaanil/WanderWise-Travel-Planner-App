@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
 
     // Call OpenAI API
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini', // Using GPT-4o-mini as specified (or gpt-4o for GPT-4.1)
+      model: 'gpt-4.1',
       messages: [
         {
           role: 'system',

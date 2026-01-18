@@ -80,7 +80,7 @@ Return ONLY the JSON array, no other text.`;
           'Authorization': `Bearer ${openaiApiKey}`,
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
+          model: 'gpt-4.1',
           messages: [
             {
               role: 'system',

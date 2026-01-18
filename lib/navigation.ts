@@ -8,6 +8,7 @@ export const routes = {
   profile: '/profile',
   plan: {
     destination: '/plan/destination',
+    fastPath: '/plan/fast-path',
     timing: '/plan/timing',
     duration: '/plan/duration',
     pace: '/plan/pace',

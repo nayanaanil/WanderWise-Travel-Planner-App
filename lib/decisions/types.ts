@@ -7,7 +7,7 @@
 
 export type DecisionDomain = 'hotel' | 'activity';
 
-export type DecisionStatus = 'OK' | 'WARNING' | 'BLOCKED';
+export type DecisionStatus = 'OK' | 'WARNING' | 'BLOCKED' | 'SUGGEST_DAY_SWAP' | 'REORDER_SUGGESTION' | 'SMART_REORDER_SUGGESTION' | 'MOVE' | 'SWAP' | 'ALLOW';
 
 export type DecisionOption = {
   id: string;

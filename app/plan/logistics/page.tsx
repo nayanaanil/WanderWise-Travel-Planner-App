@@ -385,6 +385,205 @@ export default function LogisticsPage() {
       }
     }
     
+    // PART 5: Handle SWAP_ACTIVITIES action (for high-effort day-swap suggestions)
+    if (action === 'SWAP_ACTIVITIES') {
+      const activity1Id = params.get('activity1Id');
+      const activity1NewDate = params.get('activity1NewDate');
+      const activity1NewSlot = params.get('activity1NewSlot');
+      const activity2Id = params.get('activity2Id');
+      const activity2NewDate = params.get('activity2NewDate');
+      const activity2NewSlot = params.get('activity2NewSlot');
+      const activity1Name = params.get('activity1Name'); // Name of the high-effort activity being selected
+      
+      if (activity1Id && activity1NewDate && activity1NewSlot && activity2Id && activity2NewDate && activity2NewSlot && activity1Name) {
+        // Clear URL params
+        window.history.replaceState({}, '', window.location.pathname);
+        
+        setDayActivities(prev => {
+          if (!prev || typeof prev !== 'object') {
+            prev = {};
+          }
+          
+          // activity1 (high-effort) is the NEW activity being selected for activity2NewDate (original day)
+          // activity2 (lower-effort) is already scheduled on activity1NewDate (the other day)
+          // After swap:
+          // - activity1 goes to activity1NewDate (where activity2 currently is)
+          // - activity2 goes to activity2NewDate (the original day)
+          
+          const dayWithActivity2 = prev[activity1NewDate] || {}; // Day where activity2 currently is
+          const originalDay = prev[activity2NewDate] || {}; // Original day where activity1 was being scheduled
+          
+          // Find activity2 (lower-effort activity) from the day it's currently on
+          // Check both slots to find where activity2 is
+          const activity2 = dayWithActivity2.day?.id === activity2Id ? dayWithActivity2.day :
+                           dayWithActivity2.night?.id === activity2Id ? dayWithActivity2.night :
+                           null;
+          
+          if (!activity2) {
+            console.error('[Logistics] Activity to swap not found:', activity2Id);
+            return prev; // Don't update if activity not found
+          }
+          
+          // Create updated day objects
+          const updatedDayWithActivity2: { day?: Activity; night?: Activity } = {};
+          const updatedOriginalDay: { day?: Activity; night?: Activity } = {};
+          
+          // Preserve activities not being swapped in dayWithActivity2 (where activity2 currently is)
+          if (dayWithActivity2.day && dayWithActivity2.day.id !== activity2Id) {
+            updatedDayWithActivity2.day = dayWithActivity2.day;
+          }
+          if (dayWithActivity2.night && dayWithActivity2.night.id !== activity2Id) {
+            updatedDayWithActivity2.night = dayWithActivity2.night;
+          }
+          
+          // Preserve activities not being swapped in originalDay
+          if (originalDay.day) {
+            updatedOriginalDay.day = originalDay.day;
+          }
+          if (originalDay.night) {
+            updatedOriginalDay.night = originalDay.night;
+          }
+          
+          // Place activity1 (high-effort, NEW) in dayWithActivity2 at activity1NewSlot (replacing activity2)
+          // activity1NewSlot is the slot where activity2 currently is
+          const activity1SlotKey = activity1NewSlot as 'day' | 'night';
+          updatedDayWithActivity2[activity1SlotKey] = {
+            id: activity1Id,
+            name: activity1Name,
+            activityName: activity1Name,
+            timeSlot: activity1NewSlot as TimeSlot,
+          };
+          
+          // Place activity2 (lower-effort, MOVED) in originalDay at activity2NewSlot
+          const activity2SlotKey = activity2NewSlot as 'day' | 'night';
+          updatedOriginalDay[activity2SlotKey] = {
+            ...activity2,
+            timeSlot: activity2NewSlot as TimeSlot,
+          };
+          
+          return {
+            ...prev,
+            [activity1NewDate]: updatedDayWithActivity2, // activity2 removed, activity1 added
+            [activity2NewDate]: updatedOriginalDay, // activity2 added
+          };
+        });
+        
+        // Scroll to the day and highlight
+        setTimeout(() => {
+          const dayElement = document.getElementById(`day-${activity1NewDate}`);
+          if (dayElement) {
+            dayElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setExpandedDayId(`day-${activity1NewDate}`);
+            // Highlight the swapped activity card
+            setHighlightedCard(`${activity1NewDate}-${activity1Id}`);
+            setTimeout(() => setHighlightedCard(null), 1500);
+          }
+        }, 100);
+        
+        return;
+      }
+    }
+
+    // PART 6: Handle SMART_REORDER action (for smart reorder suggestions)
+    if (action === 'SMART_REORDER') {
+      const activityId = params.get('activityId');
+      const targetDate = params.get('targetDate');
+      const targetSlot = params.get('targetSlot');
+      const movesParam = params.get('moves');
+      
+      if (activityId && targetDate && targetSlot) {
+        // Clear URL params
+        window.history.replaceState({}, '', window.location.pathname);
+        
+        setDayActivities(prev => {
+          if (!prev || typeof prev !== 'object') {
+            prev = {};
+          }
+          
+          const updated = { ...prev };
+          
+          // Parse moves if provided
+          let moves: Array<{ activityId: string; fromDate: string; fromSlot: string; toDate: string; toSlot: string }> = [];
+          if (movesParam) {
+            try {
+              moves = JSON.parse(movesParam);
+            } catch (e) {
+              console.error('[Logistics] Failed to parse moves:', e);
+            }
+          }
+          
+          // Apply all moves first (rearrange existing activities)
+          for (const move of moves) {
+            const fromDay = updated[move.fromDate] || {};
+            const toDay = updated[move.toDate] || {};
+            
+            // Find the activity being moved
+            const activityToMove = fromDay.day?.id === move.activityId ? fromDay.day :
+                                 fromDay.night?.id === move.activityId ? fromDay.night :
+                                 null;
+            
+            if (activityToMove) {
+              // Remove from source slot
+              const updatedFromDay: { day?: any; night?: any } = {};
+              if (fromDay.day && fromDay.day.id !== move.activityId) {
+                updatedFromDay.day = fromDay.day;
+              }
+              if (fromDay.night && fromDay.night.id !== move.activityId) {
+                updatedFromDay.night = fromDay.night;
+              }
+              updated[move.fromDate] = updatedFromDay;
+              
+              // Add to target slot
+              const updatedToDay = { ...toDay };
+              const targetSlotKey = move.toSlot as 'day' | 'night';
+              updatedToDay[targetSlotKey] = {
+                ...activityToMove,
+                timeSlot: targetSlotKey,
+              };
+              updated[move.toDate] = updatedToDay;
+            }
+          }
+          
+          // Finally, add the new activity to target date/slot
+          const targetDay = updated[targetDate] || {};
+          const targetSlotKey = targetSlot as 'day' | 'night';
+          
+          // Get activity name from tripState or use a placeholder
+          const tripState = getTripState();
+          const allActivities = tripState?.generatedActivitiesByCity || {};
+          const cityActivities = Object.values(allActivities).flat();
+          const activityDetails = cityActivities.find((a: any) => a.id === activityId);
+          const activityName = activityDetails?.name || 'Activity';
+          
+          updated[targetDate] = {
+            ...targetDay,
+            [targetSlotKey]: {
+              id: activityId,
+              name: activityName,
+              activityName: activityName,
+              timeSlot: targetSlot,
+            },
+          };
+          
+          return updated;
+        });
+        
+        // Scroll to the day and highlight
+        setTimeout(() => {
+          const dayElement = document.getElementById(`day-${targetDate}`);
+          if (dayElement) {
+            dayElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            setExpandedDayId(`day-${targetDate}`);
+            // Highlight the newly added activity card
+            setHighlightedCard(`${targetDate}-${activityId}`);
+            setTimeout(() => setHighlightedCard(null), 1500);
+          }
+        }, 100);
+        
+        return;
+      }
+    }
+    
     // Standard single-activity actions
     const scheduledActivity = params.get('scheduledActivity');
     const scheduledDate = params.get('scheduledDate');
@@ -1286,6 +1485,14 @@ export default function LogisticsPage() {
                     className="object-cover"
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
+                      // Prevent infinite loops: if we've already tried a fallback, stop here
+                      if (target.dataset.hasTriedFallback === 'true') {
+                        console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
+                        return;
+                      }
+                      console.error('[IMAGE_LOAD_ERROR]', target.src);
+                      // Mark that we're trying a fallback BEFORE changing src
+                      target.dataset.hasTriedFallback = 'true';
                       target.src = resolveItineraryImagePath({}, 1);
                     }}
                   />
@@ -1469,6 +1676,14 @@ export default function LogisticsPage() {
                 className="object-cover"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
+                  // Prevent infinite loops: if we've already tried a fallback, stop here
+                  if (target.dataset.hasTriedFallback === 'true') {
+                    console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
+                    return;
+                  }
+                  console.error('[IMAGE_LOAD_ERROR]', target.src);
+                  // Mark that we're trying a fallback BEFORE changing src
+                  target.dataset.hasTriedFallback = 'true';
                   target.src = resolveItineraryImagePath({}, 1);
                 }}
               />
@@ -1696,6 +1911,14 @@ export default function LogisticsPage() {
                 className="object-cover w-full h-full"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
+                  // Prevent infinite loops: if we've already tried hiding, stop here
+                  if (target.dataset.hasTriedFallback === 'true') {
+                    console.error('[IMAGE_LOAD_ERROR] Already hidden, stopping retry loop', target.src);
+                    return;
+                  }
+                  console.error('[IMAGE_LOAD_ERROR]', target.src);
+                  // Mark that we've tried a fallback
+                  target.dataset.hasTriedFallback = 'true';
                   target.style.display = 'none';
                 }}
               />
@@ -2205,6 +2428,14 @@ export default function LogisticsPage() {
                   priority
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
+                    // Prevent infinite loops: if we've already tried a fallback, stop here
+                    if (target.dataset.hasTriedFallback === 'true') {
+                      console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
+                      return;
+                    }
+                    console.error('[IMAGE_LOAD_ERROR]', target.src);
+                    // Mark that we're trying a fallback BEFORE changing src
+                    target.dataset.hasTriedFallback = 'true';
                     target.src = resolveItineraryImagePath({}, 1);
                   }}
                 />
@@ -2351,6 +2582,68 @@ export default function LogisticsPage() {
               </button>
                 </div>
               )}
+
+              {/* Total Cost Block */}
+              {(() => {
+                // Calculate flight costs
+                const outboundFlightPrice = structuralRoute.outboundFlight?.price || 0;
+                const inboundFlightPrice = structuralRoute.inboundFlight?.price || 0;
+                const flightCost = (outboundFlightPrice + inboundFlightPrice) * (totalTravelers || 1);
+                const flightsBooked = outboundFlightPrice > 0 && inboundFlightPrice > 0;
+
+                // Calculate hotel costs
+                const selectedHotels = tripState.selectedHotels || {};
+                const cityStays = groupedCityStays();
+                let hotelCost = 0;
+                let hotelsBooked = false;
+
+                if (Object.keys(selectedHotels).length > 0) {
+                  hotelsBooked = true;
+                  cityStays.forEach((stay) => {
+                    const normalizedCity = stay.city.toLowerCase().trim();
+                    const hotelEntry = Object.entries(selectedHotels).find(([city]) => 
+                      city.toLowerCase().trim() === normalizedCity
+                    );
+                    const hotel = hotelEntry ? (hotelEntry[1] as { pricePerNight?: number }) : null;
+                    
+                    // pricePerNight is per room, not per person
+                    if (hotel && hotel.pricePerNight) {
+                      hotelCost += hotel.pricePerNight * stay.nights;
+                    }
+                  });
+                }
+
+                const totalCost = flightCost + hotelCost;
+                const hasBookings = flightsBooked || hotelsBooked;
+
+                // Generate booking status message (under 5 words)
+                let bookingStatusMessage = '';
+                if (!flightsBooked && !hotelsBooked) {
+                  bookingStatusMessage = 'Nothing booked yet';
+                } else if (flightsBooked && !hotelsBooked) {
+                  bookingStatusMessage = 'Flights booked';
+                } else if (!flightsBooked && hotelsBooked) {
+                  bookingStatusMessage = 'Hotels booked';
+                } else {
+                  bookingStatusMessage = 'Flights & hotels booked';
+                }
+
+                return (
+                  <div className="pt-4 mt-4 border-t border-border">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-foreground">Total cost so far</span>
+                      <span className="text-lg font-bold text-primary">
+                        ${totalCost > 0 ? totalCost.toLocaleString() : '0'}
+                      </span>
+                    </div>
+                    {hasBookings && (
+                      <p className="text-xs text-muted-foreground">
+                        {bookingStatusMessage}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}

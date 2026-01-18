@@ -91,7 +91,7 @@ Return at most 5 locations. Focus on locations that are clearly visible on the m
 
     // Call OpenAI Vision API
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o', // Using gpt-4o which supports vision
+      model: 'gpt-4.1',
       messages: [
         {
           role: 'user',

@@ -9,13 +9,35 @@ interface ImageWithFallbackProps extends React.ImgHTMLAttributes<HTMLImageElemen
 
 export function ImageWithFallback({ src, alt, className, ...rest }: ImageWithFallbackProps) {
   const [didError, setDidError] = useState(false);
+  const [hasTriedFallback, setHasTriedFallback] = useState(false);
 
   const handleError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    // Prevent infinite loops: if we've already tried a fallback, stop here
+    if (hasTriedFallback) {
+      console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', e.currentTarget.src);
+      setDidError(true);
+      return;
+    }
+
     console.error('[IMAGE_LOAD_ERROR]', e.currentTarget.src);
+    
+    // Mark that we're trying a fallback BEFORE changing src to prevent loops
+    setHasTriedFallback(true);
+    
     // Use a generic safe fallback; itinerary-specific images now resolve via itineraryImageMap.
-    e.currentTarget.src = 'https://hegvp3kaqm660g9n.public.blob.vercel-storage.com/_default1/1.jpg';
-    setDidError(true);
-    if (rest.onError) {
+    const fallbackUrl = 'https://hegvp3kaqm660g9n.public.blob.vercel-storage.com/_default1/1.jpg';
+    
+    // If the current src is already the fallback, we're in a loop - stop here
+    if (e.currentTarget.src === fallbackUrl || e.currentTarget.src.includes('_default1/1.jpg')) {
+      console.error('[IMAGE_LOAD_ERROR] Fallback URL already set, preventing loop');
+      setDidError(true);
+      return;
+    }
+    
+    e.currentTarget.src = fallbackUrl;
+    
+    // Call custom onError handler if provided (but only once)
+    if (rest.onError && !hasTriedFallback) {
       rest.onError(e);
     }
   };

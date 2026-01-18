@@ -48,6 +48,24 @@ export interface GatewayFlightsResponse {
   gatewayOptions: GatewayOption[];
 }
 
+export interface GatewayContext {
+  city: string;
+  rank: number; // 1 | 2 | 3
+  strengths: {
+    price: "best" | "good" | "weak";
+    time: "best" | "good" | "weak";
+    reliability: "best" | "good" | "weak";
+  };
+  tradeoff: {
+    comparedTo: "price" | "time" | "reliability";
+    description: string;
+  };
+  resolution: {
+    type: "direct" | "resolved";
+    originalCity?: string;
+  };
+}
+
 export interface GatewayOption {
   id: string;
   
@@ -72,6 +90,8 @@ export interface GatewayOption {
   };
   
   explanation: string[]; // factual, non-AI prose
+  
+  gatewayContext?: GatewayContext; // Derived context for AI explanation
 }
 
 /**

@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
-import { Plane, ChevronDown, ChevronUp, Check, MapPin, Clock, DollarSign, Info } from 'lucide-react';
+import { Plane, ChevronDown, ChevronUp, Check, MapPin, Clock, DollarSign, Info, Compass } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { StepHeader } from '@/components/StepHeader';
 import { Button } from '@/ui/button';
 import { useRouter } from 'next/navigation';
 import { routes } from '@/lib/navigation';
 import { getTripState, saveTripState, setSelectedFlight } from '@/lib/tripState';
 import { GatewayOption, FlightOption as Phase1FlightOption } from '@/lib/phase1/types';
+import { derivePreferenceLens } from '@/lib/derivePreferenceLens';
+import { getEncouragementMessage, trackAgentDecisionSuccess, getAgentDecisionSuccessCount, getWatchfulMessage, shouldShowWatchfulMessage, markWatchfulMessageAsShown } from '@/lib/agentEncouragement';
+import { AgentEncouragementMessage } from '@/components/AgentEncouragementMessage';
 
 /**
  * Helper function to format price in INR
@@ -137,6 +141,15 @@ interface FlightTimeInfo {
   formattedDuration: string;
   dayOffset: number; // 0 for same day, 1 for +1 day, etc.
   dayOffsetText: string; // "+1 day", "+2 days", or empty string
+}
+
+interface FlightPriorityGuidance {
+  brief: string;
+  priorities: Array<{
+    id: 'price' | 'arrival' | 'layover';
+    label: string;
+    helper: string;
+  }>;
 }
 
 /**
@@ -346,10 +359,745 @@ function formatFlightTimeDisplay(
   };
 }
 
+/**
+ * Resolves the best gateway + flights based on user-selected priority.
+ * Uses existing ranked data only - no new scoring formulas.
+ */
+function resolveSelectionByPriority(
+  priority: 'price' | 'arrival' | 'layover',
+  gatewayOptions: GatewayOption[]
+): {
+  gatewayId: string;
+  outboundFlightId: string;
+  inboundFlightId: string;
+  priorityUsed: 'price' | 'arrival' | 'layover';
+} | null {
+  if (gatewayOptions.length === 0) {
+    return null;
+  }
+
+  if (priority === 'price') {
+    // Choose gateway with lowest total price (cheapest outbound + cheapest inbound)
+    let bestGateway: GatewayOption | null = null;
+    let bestTotalPrice = Number.MAX_SAFE_INTEGER;
+
+    for (const gateway of gatewayOptions) {
+      const cheapestOutbound = gateway.outbound.flights.reduce(
+        (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+        null as Phase1FlightOption | null
+      );
+      const cheapestInbound = gateway.inbound.flights.reduce(
+        (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+        null as Phase1FlightOption | null
+      );
+
+      if (cheapestOutbound && cheapestInbound) {
+        const totalPrice = (cheapestOutbound.price || 0) + (cheapestInbound.price || 0);
+        if (totalPrice < bestTotalPrice) {
+          bestTotalPrice = totalPrice;
+          bestGateway = gateway;
+        }
+      }
+    }
+
+    if (bestGateway) {
+      const cheapestOutbound = bestGateway.outbound.flights.reduce(
+        (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+        null as Phase1FlightOption | null
+      );
+      const cheapestInbound = bestGateway.inbound.flights.reduce(
+        (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+        null as Phase1FlightOption | null
+      );
+
+      if (cheapestOutbound && cheapestInbound) {
+        return {
+          gatewayId: bestGateway.id,
+          outboundFlightId: cheapestOutbound.id,
+          inboundFlightId: cheapestInbound.id,
+          priorityUsed: 'price',
+        };
+      }
+    }
+  } else if (priority === 'arrival') {
+    // Choose gateway whose inbound flight arrives earliest (best arrival freshness)
+    let bestGateway: GatewayOption | null = null;
+    let bestArrivalHour = 24; // Start with latest possible hour
+
+    for (const gateway of gatewayOptions) {
+      // Find earliest arriving inbound flight
+      const earliestInbound = gateway.inbound.flights.reduce(
+        (earliest, f) => {
+          if (!earliest) return f;
+          const earliestTime = earliest.arrivalTime;
+          const fTime = f.arrivalTime;
+          if (!earliestTime || !fTime) return earliest;
+
+          const [earliestHourStr] = earliestTime.split(':');
+          const [fHourStr] = fTime.split(':');
+          const earliestHour = parseInt(earliestHourStr, 10);
+          const fHour = parseInt(fHourStr, 10);
+
+          if (isNaN(earliestHour) || isNaN(fHour)) return earliest;
+
+          // Compare hours (earlier is better)
+          // Handle day rollover: if arrival is very early (0-4), treat as next day priority
+          const earliestHourAdjusted = earliestHour < 5 ? earliestHour + 24 : earliestHour;
+          const fHourAdjusted = fHour < 5 ? fHour + 24 : fHour;
+
+          return fHourAdjusted < earliestHourAdjusted ? f : earliest;
+        },
+        null as Phase1FlightOption | null
+      );
+
+      if (earliestInbound && earliestInbound.arrivalTime) {
+        const [hourStr] = earliestInbound.arrivalTime.split(':');
+        const hour = parseInt(hourStr, 10);
+        if (!isNaN(hour)) {
+          const hourAdjusted = hour < 5 ? hour + 24 : hour;
+          if (hourAdjusted < bestArrivalHour) {
+            bestArrivalHour = hourAdjusted;
+            bestGateway = gateway;
+          }
+        }
+      }
+    }
+
+    if (bestGateway) {
+      // For arrival priority, choose flights that optimize arrival freshness
+      // Use earliest inbound, and for outbound choose one that doesn't delay arrival
+      const earliestInbound = bestGateway.inbound.flights.reduce(
+        (earliest, f) => {
+          if (!earliest) return f;
+          const earliestTime = earliest.arrivalTime;
+          const fTime = f.arrivalTime;
+          if (!earliestTime || !fTime) return earliest;
+
+          const [earliestHourStr] = earliestTime.split(':');
+          const [fHourStr] = fTime.split(':');
+          const earliestHour = parseInt(earliestHourStr, 10);
+          const fHour = parseInt(fHourStr, 10);
+
+          if (isNaN(earliestHour) || isNaN(fHour)) return earliest;
+
+          const earliestHourAdjusted = earliestHour < 5 ? earliestHour + 24 : earliestHour;
+          const fHourAdjusted = fHour < 5 ? fHour + 24 : fHour;
+
+          return fHourAdjusted < earliestHourAdjusted ? f : earliest;
+        },
+        null as Phase1FlightOption | null
+      );
+
+      // For outbound, prefer recommended or fastest (optimizes overall journey)
+      const bestOutbound =
+        bestGateway.outbound.flights.find((f) => f.recommended) ||
+        bestGateway.outbound.flights.find((f) => f.fastest) ||
+        bestGateway.outbound.flights[0];
+
+      if (earliestInbound && bestOutbound) {
+        return {
+          gatewayId: bestGateway.id,
+          outboundFlightId: bestOutbound.id,
+          inboundFlightId: earliestInbound.id,
+          priorityUsed: 'arrival',
+        };
+      }
+    }
+  } else if (priority === 'layover') {
+    // Choose gateway with lowest layover burden (fewest stops, shortest layovers, non-overnight)
+    let bestGateway: GatewayOption | null = null;
+    let bestLayoverScore = Number.MAX_SAFE_INTEGER;
+
+    for (const gateway of gatewayOptions) {
+      // Calculate layover burden for this gateway
+      // Lower score = better (fewer stops, shorter layovers)
+      let gatewayLayoverScore = 0;
+
+      // Check outbound flights
+      for (const flight of gateway.outbound.flights) {
+        const stops = flight.stops ?? 0;
+        gatewayLayoverScore += stops * 100; // Each stop adds 100 points
+
+        // Check for long layovers
+        if (flight.legs && flight.legs.length > 0) {
+          for (const leg of flight.legs as any[]) {
+            if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+              const layoverMins = leg.layoverMinutes;
+              gatewayLayoverScore += layoverMins; // Add layover minutes to score
+              // Penalty for overnight layovers (>= 8 hours)
+              if (layoverMins >= 8 * 60) {
+                gatewayLayoverScore += 500; // Heavy penalty for overnight
+              }
+            }
+          }
+        }
+      }
+
+      // Check inbound flights
+      for (const flight of gateway.inbound.flights) {
+        const stops = flight.stops ?? 0;
+        gatewayLayoverScore += stops * 100;
+
+        if (flight.legs && flight.legs.length > 0) {
+          for (const leg of flight.legs as any[]) {
+            if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+              const layoverMins = leg.layoverMinutes;
+              gatewayLayoverScore += layoverMins;
+              if (layoverMins >= 8 * 60) {
+                gatewayLayoverScore += 500;
+              }
+            }
+          }
+        }
+      }
+
+      // Use average score per flight for comparison
+      const avgScore = gatewayLayoverScore / (gateway.outbound.flights.length + gateway.inbound.flights.length);
+      if (avgScore < bestLayoverScore) {
+        bestLayoverScore = avgScore;
+        bestGateway = gateway;
+      }
+    }
+
+    if (bestGateway) {
+      // For layover priority, choose flights with minimal layover pain
+      // Prefer direct flights, then flights with fewest stops
+      const bestOutbound = bestGateway.outbound.flights.reduce(
+        (best, f) => {
+          if (!best) return f;
+          const bestStops = best.stops ?? 0;
+          const fStops = f.stops ?? 0;
+          if (fStops < bestStops) return f;
+          if (fStops > bestStops) return best;
+          // If same stops, prefer recommended
+          if (f.recommended && !best.recommended) return f;
+          return best;
+        },
+        null as Phase1FlightOption | null
+      );
+
+      const bestInbound = bestGateway.inbound.flights.reduce(
+        (best, f) => {
+          if (!best) return f;
+          const bestStops = best.stops ?? 0;
+          const fStops = f.stops ?? 0;
+          if (fStops < bestStops) return f;
+          if (fStops > bestStops) return best;
+          if (f.recommended && !best.recommended) return f;
+          return best;
+        },
+        null as Phase1FlightOption | null
+      );
+
+      if (bestOutbound && bestInbound) {
+        return {
+          gatewayId: bestGateway.id,
+          outboundFlightId: bestOutbound.id,
+          inboundFlightId: bestInbound.id,
+          priorityUsed: 'layover',
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Generates confirmation copy for the resolved selection.
+ * Simple template-based, no AI call.
+ */
+function generateConfirmationCopy(
+  priority: 'price' | 'arrival' | 'layover',
+  gateway: GatewayOption,
+  outboundFlight: Phase1FlightOption,
+  inboundFlight: Phase1FlightOption
+): string {
+  if (priority === 'price') {
+    const hasStops = (outboundFlight.stops ?? 0) > 0 || (inboundFlight.stops ?? 0) > 0;
+    if (hasStops) {
+      return "Picked for you because you wanted the best price — this saves money, with a few stops along the way.";
+    }
+    return "Picked for you because you wanted the best price — this gets you the lowest total cost.";
+  } else if (priority === 'arrival') {
+    const arrivalTime = inboundFlight.arrivalTime;
+    if (arrivalTime) {
+      const [hourStr] = arrivalTime.split(':');
+      const hour = parseInt(hourStr, 10);
+      if (!isNaN(hour) && hour < 14) {
+        return "Picked for you because you wanted to arrive fresh — this gets you in early, so you can make the most of your first day.";
+      }
+    }
+    return "Picked for you because you wanted to arrive fresh — this gets you in at the best time, with a longer layover along the way.";
+  } else if (priority === 'layover') {
+    const outboundStops = outboundFlight.stops ?? 0;
+    const inboundStops = inboundFlight.stops ?? 0;
+    if (outboundStops === 0 && inboundStops === 0) {
+      return "Picked for you because you wanted fewer layovers — this gives you direct flights with no connections.";
+    }
+    return "Picked for you because you wanted fewer layovers — this minimizes connections and keeps layovers short.";
+  }
+  return "Picked for you based on your priority.";
+}
+
+/**
+ * Generates recommendation explanation copy for the agent pick section.
+ * Template-based, no AI call.
+ */
+function generateRecommendationExplanation(
+  priority: 'price' | 'arrival' | 'layover',
+  outboundFlight: Phase1FlightOption,
+  inboundFlight: Phase1FlightOption
+): { mainBenefit: string; acceptedTradeoff: string } {
+  if (priority === 'price') {
+    const hasStops = (outboundFlight.stops ?? 0) > 0 || (inboundFlight.stops ?? 0) > 0;
+    return {
+      mainBenefit: 'the lowest total price',
+      acceptedTradeoff: hasStops ? 'a few stops along the way' : 'potentially longer travel time',
+    };
+  } else if (priority === 'arrival') {
+    const arrivalTime = inboundFlight.arrivalTime;
+    let benefit = 'the best arrival time';
+    if (arrivalTime) {
+      const [hourStr] = arrivalTime.split(':');
+      const hour = parseInt(hourStr, 10);
+      if (!isNaN(hour) && hour < 14) {
+        benefit = 'an early arrival so you can make the most of your first day';
+      }
+    }
+    const hasLongLayovers = (outboundFlight.stops ?? 0) > 0 || (inboundFlight.stops ?? 0) > 0;
+    return {
+      mainBenefit: benefit,
+      acceptedTradeoff: hasLongLayovers ? 'longer layovers' : 'potentially higher cost',
+    };
+  } else if (priority === 'layover') {
+    const outboundStops = outboundFlight.stops ?? 0;
+    const inboundStops = inboundFlight.stops ?? 0;
+    if (outboundStops === 0 && inboundStops === 0) {
+      return {
+        mainBenefit: 'direct flights with no connections',
+        acceptedTradeoff: 'potentially higher cost or less ideal timing',
+      };
+    }
+    return {
+      mainBenefit: 'minimal connections and short layovers',
+      acceptedTradeoff: 'potentially higher cost or less ideal arrival times',
+    };
+  }
+  return {
+    mainBenefit: 'the best option for your priority',
+    acceptedTradeoff: 'some tradeoffs',
+  };
+}
+
 interface FlightOptionsResultsScreenProps {
   onBack?: () => void;
   onSelectFlight?: () => void;
   onBackToPreferences?: () => void;
+}
+
+/**
+ * Detects if AI explanation references preferenceLens elements.
+ * Simple keyword-based detection for priority and tolerance themes.
+ * 
+ * Returns true if explanation contains keywords/phrases tied to:
+ * - priority: "time", "saving time", "shorter", "faster"
+ * - priority: "cost", "save", "budget", "cheaper"
+ * - priority: "comfort", "fewer stops", "less tiring", "more reliable"
+ * - tolerance: stops-related terms when tolerance is relevant
+ * 
+ * This is deterministic and safe - does not need to be perfect.
+ */
+function doesExplanationReferencePreferenceLens(
+  explanation: string | null | undefined,
+  preferenceLens: { priority: string; tolerance: { stops: string; longJourneys: string } }
+): boolean {
+  if (!explanation) return false;
+
+  const explanationLower = explanation.toLowerCase();
+
+  // Priority: "time" keywords
+  const timeKeywords = ['time', 'shorter', 'faster', 'quick', 'speed', 'hours', 'duration', 'efficient'];
+  const hasTimeReference = timeKeywords.some(keyword => explanationLower.includes(keyword));
+
+  // Priority: "cost" keywords
+  const costKeywords = ['save', 'saves', 'saving', 'budget', 'cheaper', 'cheap', 'affordable', 'price', 'cost', '$'];
+  const hasCostReference = costKeywords.some(keyword => explanationLower.includes(keyword));
+
+  // Priority: "comfort" keywords
+  const comfortKeywords = ['fewer stops', 'less tiring', 'more reliable', 'reliable', 'smooth', 'comfortable', 'direct', 'connection'];
+  const hasComfortReference = comfortKeywords.some(keyword => explanationLower.includes(keyword));
+
+  // Check if explanation aligns with priority
+  const alignsWithPriority = 
+    (preferenceLens.priority === 'time' && hasTimeReference) ||
+    (preferenceLens.priority === 'cost' && hasCostReference) ||
+    (preferenceLens.priority === 'comfort' && hasComfortReference);
+
+  // Check tolerance references (stops-related)
+  const stopsKeywords = ['stop', 'stops', 'connection', 'connections', 'direct', 'layover'];
+  const hasStopsReference = stopsKeywords.some(keyword => explanationLower.includes(keyword));
+
+  // Show compass if explanation references priority OR tolerance
+  return alignsWithPriority || hasStopsReference;
+}
+
+/**
+ * Derives firstDayUsability signal from flight characteristics.
+ * 
+ * "Good" = Arrive early enough to have a productive first day
+ * "Mixed" = Arrive mid-day, some first-day usability
+ * "Poor" = Arrive late, first day mostly lost
+ */
+function deriveFirstDayUsability(
+  arrivalTime: string | undefined,
+  totalDurationMinutes: number
+): 'good' | 'mixed' | 'poor' {
+  if (!arrivalTime || typeof arrivalTime !== 'string' || arrivalTime.length < 2) {
+    return 'mixed'; // Default if time unavailable
+  }
+
+  const [hourStr] = arrivalTime.split(':');
+  const hour = parseInt(hourStr, 10);
+  if (isNaN(hour)) {
+    return 'mixed';
+  }
+
+  // Good: Arrive before 2 PM (14:00) - full day available
+  if (hour < 14) {
+    return 'good';
+  }
+
+  // Poor: Arrive after 8 PM (20:00) - first day mostly lost
+  if (hour >= 20) {
+    return 'poor';
+  }
+
+  // Also consider total duration: Very long flights (>12h) arriving mid-day are still poor
+  if (totalDurationMinutes > 12 * 60 && hour >= 14) {
+    return 'poor';
+  }
+
+  // Mixed: Arrive between 2 PM and 8 PM
+  return 'mixed';
+}
+
+/**
+ * Derives connectionAnxiety signal from layover and connection characteristics.
+ * 
+ * "Low" = Direct flights or comfortable layovers
+ * "Medium" = Short layovers or one connection
+ * "High" = Multiple connections, tight layovers, or long layovers
+ */
+function deriveConnectionAnxiety(
+  stops: number,
+  layoverMinutes: number | null,
+  totalDurationMinutes: number
+): 'low' | 'medium' | 'high' {
+  // Low: Direct flights (no connections)
+  if (stops === 0) {
+    return 'low';
+  }
+
+  // High: Multiple connections (2+ stops)
+  if (stops >= 2) {
+    return 'high';
+  }
+
+  // For single connection, check layover duration
+  if (layoverMinutes !== null) {
+    // High: Very short layovers (< 1 hour) - tight connection risk
+    if (layoverMinutes < 60) {
+      return 'high';
+    }
+
+    // High: Very long layovers (> 8 hours) - connection fatigue
+    if (layoverMinutes > 8 * 60) {
+      return 'high';
+    }
+
+    // Medium: Comfortable layovers (1-8 hours)
+    return 'medium';
+  }
+
+  // If layover data unavailable but we have stops, default to medium
+  return 'medium';
+}
+
+/**
+ * Derives sleepDisruptionRisk signal from departure/arrival times and duration.
+ * 
+ * "Low" = Depart/arrive at reasonable hours, short duration
+ * "Medium" = Some disruption (overnight flight, late arrival, or early departure)
+ * "High" = Significant disruption (red-eye, very late arrival, or very early departure)
+ */
+function deriveSleepDisruptionRisk(
+  departureTime: string | undefined,
+  arrivalTime: string | undefined,
+  totalDurationMinutes: number
+): 'low' | 'medium' | 'high' {
+  if (!departureTime || !arrivalTime) {
+    return 'medium'; // Default if times unavailable
+  }
+
+  const [depHourStr] = departureTime.split(':');
+  const [arrHourStr] = arrivalTime.split(':');
+  const depHour = parseInt(depHourStr, 10);
+  const arrHour = parseInt(arrHourStr, 10);
+
+  if (isNaN(depHour) || isNaN(arrHour)) {
+    return 'medium';
+  }
+
+  // High: Red-eye flights (depart 22:00-04:00)
+  const isRedEye = depHour >= 22 || depHour < 4;
+  
+  // High: Very late arrivals (after 23:00 or before 5:00)
+  const isVeryLateArrival = arrHour >= 23 || arrHour < 5;
+  
+  // High: Very early departures (before 6:00)
+  const isVeryEarlyDeparture = depHour < 6;
+  
+  // High: Very long flights (> 14 hours) that cross many time zones
+  const isVeryLongFlight = totalDurationMinutes > 14 * 60;
+
+  if (isRedEye || isVeryLateArrival || (isVeryEarlyDeparture && isVeryLongFlight)) {
+    return 'high';
+  }
+
+  // Medium: Overnight flights (depart evening, arrive morning) or late arrivals
+  const isOvernight = (depHour >= 18 && arrHour < 12) || (depHour >= 20 && arrHour < 14);
+  const isLateArrival = arrHour >= 21 || arrHour < 8;
+  const isEarlyDeparture = depHour < 8;
+  const isLongFlight = totalDurationMinutes > 10 * 60;
+
+  if (isOvernight || isLateArrival || (isEarlyDeparture && isLongFlight)) {
+    return 'medium';
+  }
+
+  // Low: Reasonable departure/arrival times, moderate duration
+  return 'low';
+}
+
+/**
+ * Aggregates human travel signals across all flights.
+ * Returns the most common (mode) or most severe signal.
+ */
+function aggregateTravelSignals(
+  allFlights: Phase1FlightOption[]
+): {
+  firstDayUsability: 'good' | 'mixed' | 'poor';
+  connectionAnxiety: 'low' | 'medium' | 'high';
+  sleepDisruptionRisk: 'low' | 'medium' | 'high';
+} {
+  if (allFlights.length === 0) {
+    return {
+      firstDayUsability: 'mixed',
+      connectionAnxiety: 'low',
+      sleepDisruptionRisk: 'low',
+    };
+  }
+
+  const firstDayUsabilitySignals: Array<'good' | 'mixed' | 'poor'> = [];
+  const connectionAnxietySignals: Array<'low' | 'medium' | 'high'> = [];
+  const sleepDisruptionRiskSignals: Array<'low' | 'medium' | 'high'> = [];
+
+  for (const flight of allFlights) {
+    const durationMinutes = parseDurationToMinutes(flight.duration);
+    
+    // First day usability
+    firstDayUsabilitySignals.push(
+      deriveFirstDayUsability(flight.arrivalTime, durationMinutes)
+    );
+
+    // Connection anxiety
+    let maxLayoverMinutes: number | null = null;
+    if (flight.legs && flight.legs.length > 0) {
+      for (const leg of flight.legs as any[]) {
+        if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+          maxLayoverMinutes = Math.max(maxLayoverMinutes || 0, leg.layoverMinutes);
+        }
+      }
+    }
+    connectionAnxietySignals.push(
+      deriveConnectionAnxiety(flight.stops ?? 0, maxLayoverMinutes, durationMinutes)
+    );
+
+    // Sleep disruption risk
+    sleepDisruptionRiskSignals.push(
+      deriveSleepDisruptionRisk(flight.departureTime, flight.arrivalTime, durationMinutes)
+    );
+  }
+
+  // Aggregate: Use mode (most common) for each signal
+  // For severity-ordered signals, prefer the more severe if tied
+  const getMode = <T extends string>(signals: T[], severityOrder?: T[]): T => {
+    const counts = new Map<T, number>();
+    for (const signal of signals) {
+      counts.set(signal, (counts.get(signal) || 0) + 1);
+    }
+    
+    let maxCount = 0;
+    let mode: T = signals[0];
+    
+    for (const [signal, count] of counts.entries()) {
+      if (count > maxCount) {
+        maxCount = count;
+        mode = signal;
+      } else if (count === maxCount && severityOrder) {
+        // If tied, prefer more severe
+        const currentIdx = severityOrder.indexOf(mode);
+        const candidateIdx = severityOrder.indexOf(signal);
+        if (candidateIdx > currentIdx) {
+          mode = signal;
+        }
+      }
+    }
+    
+    return mode;
+  };
+
+  return {
+    firstDayUsability: getMode(firstDayUsabilitySignals, ['good', 'mixed', 'poor']),
+    connectionAnxiety: getMode(connectionAnxietySignals, ['low', 'medium', 'high']),
+    sleepDisruptionRisk: getMode(sleepDisruptionRiskSignals, ['low', 'medium', 'high']),
+  };
+}
+
+/**
+ * Determines whether meaningful differences exist across gateway + flight options
+ * in three dimensions: price, arrival, and layover.
+ * 
+ * This is a deterministic gate to decide if the Page-Level Flight Guidance AI
+ * should be called. The AI should only ask clarifying questions if 2+ dimensions
+ * show meaningful differences.
+ * 
+ * @param gatewayOptions Array of gateway options with outbound/inbound flights
+ * @returns Object indicating which dimensions differ meaningfully
+ */
+function computeMeaningfulDifferences(
+  gatewayOptions: GatewayOption[]
+): {
+  price: boolean;
+  arrival: boolean;
+  layover: boolean;
+} {
+  // Collect all flights across all gateways
+  const allFlights: Phase1FlightOption[] = gatewayOptions.flatMap((g) => [
+    ...g.outbound.flights,
+    ...g.inbound.flights,
+  ]);
+
+  if (allFlights.length === 0) {
+    return { price: false, arrival: false, layover: false };
+  }
+
+  // 1. PRICE DIFFERENCE CHECK
+  // Calculate total price per gateway (cheapest outbound + cheapest inbound)
+  const gatewayTotalPrices: number[] = gatewayOptions
+    .map((gateway) => {
+      const cheapestOutbound = gateway.outbound.flights.reduce(
+        (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+        null as Phase1FlightOption | null
+      );
+      const cheapestInbound = gateway.inbound.flights.reduce(
+        (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+        null as Phase1FlightOption | null
+      );
+      
+      if (!cheapestOutbound || !cheapestInbound) return null;
+      return (cheapestOutbound.price || 0) + (cheapestInbound.price || 0);
+    })
+    .filter((p): p is number => p !== null && p > 0);
+
+  let priceDiffers = false;
+  if (gatewayTotalPrices.length >= 2) {
+    const minPrice = Math.min(...gatewayTotalPrices);
+    const maxPrice = Math.max(...gatewayTotalPrices);
+    const priceDiff = maxPrice - minPrice;
+    // Meaningful difference: >20% relative difference OR >$100 absolute difference
+    const relativeThreshold = minPrice * 0.2;
+    const absoluteThreshold = 100;
+    priceDiffers = priceDiff > Math.max(relativeThreshold, absoluteThreshold);
+  }
+
+  // 2. ARRIVAL TIME DIFFERENCE CHECK
+  // Categorize arrivals into buckets: morning (5-12), afternoon (12-21), late night (21-5)
+  const arrivalBuckets = {
+    morning: 0,
+    afternoon: 0,
+    lateNight: 0,
+  };
+
+  for (const flight of allFlights) {
+    const timeStr = flight.arrivalTime as string | undefined;
+    if (!timeStr || typeof timeStr !== 'string' || timeStr.length < 2) continue;
+    
+    const [hourStr] = timeStr.split(':');
+    const hour = parseInt(hourStr, 10);
+    if (isNaN(hour)) continue;
+
+    if (hour >= 5 && hour < 12) {
+      arrivalBuckets.morning += 1;
+    } else if (hour >= 12 && hour < 21) {
+      arrivalBuckets.afternoon += 1;
+    } else {
+      // 21:00-04:59
+      arrivalBuckets.lateNight += 1;
+    }
+  }
+
+  // Meaningful difference: arrivals span 2+ different time buckets
+  const bucketsWithFlights = [
+    arrivalBuckets.morning > 0,
+    arrivalBuckets.afternoon > 0,
+    arrivalBuckets.lateNight > 0,
+  ].filter(Boolean).length;
+  
+  const arrivalDiffers = bucketsWithFlights >= 2;
+
+  // 3. LAYOVER DIFFERENCE CHECK
+  // Find longest layover across all flights
+  let longestLayoverMinutes = 0;
+  let hasOvernightLayover = false;
+
+  for (const flight of allFlights) {
+    if (!flight.legs || flight.legs.length === 0) continue;
+    
+    for (const leg of flight.legs as any[]) {
+      if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+        const layoverMins = leg.layoverMinutes;
+        longestLayoverMinutes = Math.max(longestLayoverMinutes, layoverMins);
+        
+        // Overnight layover: >= 8 hours (480 minutes)
+        if (layoverMins >= 480) {
+          hasOvernightLayover = true;
+        }
+      }
+    }
+  }
+
+  // Also check if we have flights with no layovers (direct) vs flights with layovers
+  const directFlights = allFlights.filter((f) => (f.stops ?? 0) === 0).length;
+  const flightsWithLayovers = allFlights.length - directFlights;
+
+  // Meaningful difference if:
+  // - Longest layover is "long" (>= 5h) AND we have some direct/short-layover options
+  // - OR we have overnight layovers mixed with shorter options
+  // - OR we have mix of direct flights and flights with layovers
+  const hasLongLayovers = longestLayoverMinutes >= 5 * 60; // 5 hours
+  const hasShortLayovers = longestLayoverMinutes > 0 && longestLayoverMinutes < 2 * 60; // < 2 hours
+  
+  const layoverDiffers =
+    (hasLongLayovers && (directFlights > 0 || hasShortLayovers)) ||
+    hasOvernightLayover ||
+    (directFlights > 0 && flightsWithLayovers > 0);
+
+  return {
+    price: priceDiffers,
+    arrival: arrivalDiffers,
+    layover: layoverDiffers,
+  };
 }
 
 /**
@@ -378,10 +1126,39 @@ export function FlightOptionsResultsScreen({
   const [expandedGatewayId, setExpandedGatewayId] = useState<string | null>(null);
   const [expandedFlightIds, setExpandedFlightIds] = useState<Set<string>>(new Set());
   const [sortOption, setSortOption] = useState<'best' | 'cheapest' | 'fastest'>('best');
-  const [aiExplanation, setAiExplanation] = useState<{ summary: string } | null>(null);
-  const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
+  // Gateway and flight explanations removed - no longer used
+  const [preferenceLens, setPreferenceLens] = useState<{ priority: string; tolerance: { stops: string; longJourneys: string } } | null>(null);
+  const [flightPriorityGuidance, setFlightPriorityGuidance] = useState<FlightPriorityGuidance | null>(null);
+  const [selectedFlightPriority, setSelectedFlightPriority] = useState<'price' | 'arrival' | 'layover' | null>(null);
+  const [showPriorityGuidance, setShowPriorityGuidance] = useState(false);
+  
+  // Auto-show guidance when it's first loaded
+  useEffect(() => {
+    if (flightPriorityGuidance) {
+      setShowPriorityGuidance(true);
+    }
+  }, [flightPriorityGuidance]);
+  const [agentResolvedSelection, setAgentResolvedSelection] = useState<{
+    gatewayId: string;
+    outboundFlightId: string;
+    inboundFlightId: string;
+    priorityUsed: 'price' | 'arrival' | 'layover';
+  } | null>(null);
+  const [encouragementMessage, setEncouragementMessage] = useState<string | null>(null);
+  const [agentSuccessCount, setAgentSuccessCount] = useState(0);
+  const [shouldShowWatchfulMsg, setShouldShowWatchfulMsg] = useState(false);
 
-  // Guard: Check for gatewayOptions on mount
+  // Load agent success count on mount and check if watchful message should be shown
+  useEffect(() => {
+    const count = getAgentDecisionSuccessCount();
+    setAgentSuccessCount(count);
+    setShouldShowWatchfulMsg(shouldShowWatchfulMessage(count));
+    if (shouldShowWatchfulMessage(count)) {
+      markWatchfulMessageAsShown();
+    }
+  }, []);
+
+  // Guard: Check for gatewayOptions on mount and pre-fetch gateway explanations
   useEffect(() => {
     const tripState = getTripState();
     
@@ -393,6 +1170,210 @@ export function FlightOptionsResultsScreen({
 
     setGatewayOptions(tripState.gatewayOptions);
     
+    // Gateway explanations removed - no longer fetching AI explanations for individual gateways
+    
+    // Page-level Flight Priority Clarification Agent (runs once per page load)
+    try {
+      const budget = tripState.budget === 'budget' ? 'low' : tripState.budget === 'luxury' ? 'high' : 'medium';
+      const pace = tripState.pace || 'moderate';
+      const adults = tripState.adults || tripState.tripInput?.adults || 1;
+      const kids = tripState.kids || tripState.tripInput?.kids || 0;
+      const interests = tripState.styles || tripState.tripInput?.styles || [];
+
+      let tripDurationDays: number | undefined;
+      const dateRange = tripState.dateRange || tripState.tripInput?.dateRange;
+      if (dateRange?.from && dateRange?.to) {
+        const from = new Date(dateRange.from);
+        const to = new Date(dateRange.to);
+        if (!isNaN(from.getTime()) && !isNaN(to.getTime())) {
+          tripDurationDays = Math.max(
+            1,
+            Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24))
+          );
+        }
+      }
+
+      const allFlights: Phase1FlightOption[] = tripState.gatewayOptions.flatMap((g: any) => [
+        ...g.outbound.flights,
+        ...g.inbound.flights,
+      ]);
+
+      const prices = allFlights
+        .map(f => f.price)
+        .filter((p: number | undefined) => typeof p === 'number' && p > 0) as number[];
+
+      const durations = allFlights
+        .map(f => parseDurationToMinutes(f.duration))
+        .filter(d => d > 0);
+
+      let priceRange: { min: number; max: number } | null = null;
+      if (prices.length > 0) {
+        const min = Math.min(...prices);
+        const max = Math.max(...prices);
+        priceRange = { min, max };
+      }
+
+      let totalTravelTimeRangeMinutes: { min: number; max: number } | null = null;
+      if (durations.length > 0) {
+        const min = Math.min(...durations);
+        const max = Math.max(...durations);
+        totalTravelTimeRangeMinutes = { min, max };
+      }
+
+      const stopsArray = allFlights.map(f => f.stops ?? 0);
+      const averageStops =
+        stopsArray.length > 0
+          ? stopsArray.reduce((sum, s) => sum + s, 0) / stopsArray.length
+          : 0;
+
+      const gatewaysWithAlternatives = tripState.gatewayOptions.filter((g: any) => {
+        const outboundCount = g.outbound?.flights?.length || 0;
+        const inboundCount = g.inbound?.flights?.length || 0;
+        return outboundCount + inboundCount > 1;
+      }).length;
+
+      const layoverPatterns = (() => {
+        const longLayoverThresholdMinutes = 5 * 60; // 5 hours+
+        let hasLongLayovers = false;
+
+        for (const flight of allFlights) {
+          if (!flight.legs || flight.legs.length === 0) continue;
+          for (const leg of flight.legs as any[]) {
+            if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+              if (leg.layoverMinutes >= longLayoverThresholdMinutes) {
+                hasLongLayovers = true;
+                break;
+              }
+            }
+          }
+          if (hasLongLayovers) break;
+        }
+
+        const stopCounts = stopsArray;
+        let typicalStops: 'nonstop' | 'one-stop' | 'multi-stop' | 'mixed' = 'mixed';
+        if (stopCounts.length > 0) {
+          if (stopCounts.every(s => s === 0)) {
+            typicalStops = 'nonstop';
+          } else if (stopCounts.every(s => s === 1)) {
+            typicalStops = 'one-stop';
+          } else if (stopCounts.every(s => s >= 2)) {
+            typicalStops = 'multi-stop';
+          }
+        }
+
+        return {
+          hasLongLayovers,
+          typicalStops,
+        };
+      })();
+
+      const arrivalPatterns = (() => {
+        let morning = 0;
+        let lateNight = 0;
+
+        for (const flight of allFlights) {
+          const timeStr = flight.arrivalTime as string | undefined;
+          if (!timeStr || typeof timeStr !== 'string' || timeStr.length < 2) continue;
+          const [hourStr] = timeStr.split(':');
+          const hour = parseInt(hourStr, 10);
+          if (isNaN(hour)) continue;
+
+          if (hour >= 5 && hour < 12) {
+            morning += 1;
+          } else if (hour >= 21 || hour < 2) {
+            lateNight += 1;
+          }
+        }
+
+        const total = allFlights.length || 1;
+        const mostlyMorning = morning / total > 0.6;
+        const mostlyLateNight = lateNight / total > 0.6;
+        const mixed = !mostlyMorning && !mostlyLateNight;
+
+        return {
+          mostlyMorning,
+          mostlyLateNight,
+          mixed,
+        };
+      })();
+
+      const reliability = {
+        totalOptions: allFlights.length,
+        gatewaysWithAlternatives,
+        averageStops,
+      };
+
+      // Deterministic gate: Check if meaningful differences exist
+      // Flight Decision Support Agent loop:
+      // - IF ≥2 differences: AI brief + priority question shown
+      // - IF <2 differences (but ≥1): AI brief only (no question, empty priorities)
+      // - IF 0 differences: Skip AI call (no guidance needed)
+      const meaningfulDifferences = computeMeaningfulDifferences(tripState.gatewayOptions);
+      const dimensionsThatDiffer = [
+        meaningfulDifferences.price,
+        meaningfulDifferences.arrival,
+        meaningfulDifferences.layover,
+      ].filter(Boolean).length;
+
+      // Skip AI call only if NO dimensions differ meaningfully (0 differences)
+      if (dimensionsThatDiffer === 0) {
+        // No meaningful differences at all - skip guidance entirely
+        return;
+      }
+
+      // Continue with AI call for ≥1 differences
+      // AI will return empty priorities if only 1 dimension differs
+
+      // Derive human travel signals from flight characteristics
+      const travelSignals = aggregateTravelSignals(allFlights);
+
+      const payload = {
+        tripContext: {
+          pace,
+          interests,
+          travelers: {
+            adults,
+            kids,
+          },
+          tripDurationDays,
+        },
+        aggregatedFacts: {
+          priceRange,
+          totalTravelTimeRangeMinutes,
+          layoverPatterns,
+          arrivalPatterns,
+          reliability,
+        },
+        differentiators: meaningfulDifferences,
+        travelSignals: {
+          firstDayUsability: travelSignals.firstDayUsability,
+          connectionAnxiety: travelSignals.connectionAnxiety,
+          sleepDisruptionRisk: travelSignals.sleepDisruptionRisk,
+        },
+      };
+
+      fetch('/api/agent/flight-priority-guidance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+        .then(async (res) => {
+          if (!res.ok) return null;
+          return (await res.json()) as FlightPriorityGuidance;
+        })
+        .then((data) => {
+          // Accept guidance with brief and valid priorities array (can be empty)
+          if (data && data.brief && typeof data.brief === 'string' && Array.isArray(data.priorities)) {
+            setFlightPriorityGuidance(data);
+          }
+        })
+        .catch((err) => {
+          console.error('[FlightPriorityGuidance] Failed to fetch guidance', err);
+        });
+    } catch (err) {
+      console.error('[FlightPriorityGuidance] Failed to prepare guidance payload', err);
+    }
+    
     // If user already has a selection, restore it
     if (tripState.selectedFlights) {
       // Try to find which gateway option matches the selected flights
@@ -400,107 +1381,23 @@ export function FlightOptionsResultsScreen({
     }
   }, [router]);
 
-  // Fetch AI explanation when gateway is selected and expanded
+  // Flight explanations removed - no longer fetching AI explanations for individual flights
+
+  // Resolve selection when user selects a priority
   useEffect(() => {
-    if (!selectedGatewayId || !expandedGatewayId || selectedGatewayId !== expandedGatewayId) {
-      setAiExplanation(null);
+    if (!selectedFlightPriority || gatewayOptions.length === 0) {
+      setAgentResolvedSelection(null);
       return;
     }
 
-    const selectedGateway = gatewayOptions.find(g => g.id === selectedGatewayId);
-    if (!selectedGateway) {
-      setAiExplanation(null);
-      return;
+    const resolved = resolveSelectionByPriority(selectedFlightPriority, gatewayOptions);
+    setAgentResolvedSelection(resolved);
+
+    // Auto-expand the resolved gateway so user can see the flights
+    if (resolved) {
+      setExpandedGatewayId(resolved.gatewayId);
     }
-
-    // Get user preferences from tripState
-    const tripState = getTripState();
-    const budget = tripState.budget === 'budget' ? 'low' : tripState.budget === 'luxury' ? 'high' : 'medium';
-    const pace = tripState.pace || 'moderate';
-    const groupSize = (tripState.adults || 1) + (tripState.kids || 0);
-
-    // Get sorted outbound flights
-    const sortedOutbound = sortFlights(selectedGateway.outbound.flights);
-    
-    if (sortedOutbound.length === 0) {
-      setAiExplanation(null);
-      return;
-    }
-
-    // Find the recommended flight (should be marked by the ranking system)
-    const recommendedFlight = sortedOutbound.find(f => f.recommended) || sortedOutbound[0];
-
-    // Build recommended flight data
-    const recommended = {
-      airline: recommendedFlight.airline || recommendedFlight.airlineName || 'Unknown',
-      price: recommendedFlight.price || 0,
-      durationMinutes: parseDurationToMinutes(recommendedFlight.duration),
-      stops: recommendedFlight.stops ?? 0,
-    };
-
-    // Determine comparison flight based on user preferences
-    let comparison: { type: 'cheapest' | 'fastest'; airline: string; priceDifference: number; timeDifferenceMinutes: number } | undefined;
-
-    if (budget === 'low') {
-      // Find cheapest flight that's different from recommended
-      const cheapestFlight = sortedOutbound.find(f => f.id !== recommendedFlight.id && (f.price || 0) < recommended.price);
-      if (cheapestFlight && cheapestFlight.price) {
-        comparison = {
-          type: 'cheapest',
-          airline: cheapestFlight.airline || cheapestFlight.airlineName || 'Unknown',
-          priceDifference: recommended.price - cheapestFlight.price,
-          timeDifferenceMinutes: parseDurationToMinutes(cheapestFlight.duration) - recommended.durationMinutes,
-        };
-      }
-    } else if (pace === 'packed') {
-      // Find fastest flight that's different from recommended
-      const fastestFlight = sortedOutbound
-        .filter(f => f.id !== recommendedFlight.id)
-        .sort((a, b) => parseDurationToMinutes(a.duration) - parseDurationToMinutes(b.duration))[0];
-      
-      if (fastestFlight) {
-        const fastestDuration = parseDurationToMinutes(fastestFlight.duration);
-        if (fastestDuration < recommended.durationMinutes) {
-          comparison = {
-            type: 'fastest',
-            airline: fastestFlight.airline || fastestFlight.airlineName || 'Unknown',
-            priceDifference: (fastestFlight.price || 0) - recommended.price,
-            timeDifferenceMinutes: recommended.durationMinutes - fastestDuration,
-          };
-        }
-      }
-    }
-
-    // Fetch AI explanation with new schema
-    setIsLoadingExplanation(true);
-    fetch('/api/agent/explain-flights', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recommended,
-        comparison,
-        userPreferences: {
-          budget,
-          pace: pace as 'relaxed' | 'moderate' | 'packed',
-          groupSize,
-        },
-      }),
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.summary) {
-          setAiExplanation({ summary: data.summary });
-        } else {
-          setAiExplanation(null);
-        }
-        setIsLoadingExplanation(false);
-      })
-      .catch(err => {
-        console.error('[FlightOptions] Failed to fetch AI explanation:', err);
-        setIsLoadingExplanation(false);
-        setAiExplanation(null);
-      });
-  }, [selectedGatewayId, expandedGatewayId, gatewayOptions, sortOption]);
+  }, [selectedFlightPriority, gatewayOptions]);
 
   const handleGatewaySelect = (gatewayId: string) => {
     if (selectedGatewayId === gatewayId) {
@@ -514,6 +1411,7 @@ export function FlightOptionsResultsScreen({
       setSelectedOutboundFlightId(null);
       setSelectedInboundFlightId(null);
     }
+    // Note: Gateway explanation state is independent - clicking gateway card does NOT affect it
   };
 
   const handleOutboundFlightSelect = (flightId: string) => {
@@ -522,6 +1420,34 @@ export function FlightOptionsResultsScreen({
 
   const handleInboundFlightSelect = (flightId: string) => {
     setSelectedInboundFlightId(flightId);
+  };
+
+  // Scroll to flight card and optionally highlight it
+  const scrollToFlightCard = (flightId: string, isOutbound: boolean) => {
+    // Create a unique ID for the flight card element
+    const elementId = `flight-${isOutbound ? 'outbound' : 'inbound'}-${flightId}`;
+    const element = document.getElementById(elementId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Temporarily add a highlight class
+      element.classList.add('ring-2', 'ring-orange-400', 'ring-offset-2');
+      setTimeout(() => {
+        element.classList.remove('ring-2', 'ring-orange-400', 'ring-offset-2');
+      }, 2000);
+    }
+  };
+
+  // Auto-select resolved flights
+  const handleSelectResolvedFlights = () => {
+    if (!agentResolvedSelection) return;
+    
+    // Set gateway selection
+    setSelectedGatewayId(agentResolvedSelection.gatewayId);
+    setExpandedGatewayId(agentResolvedSelection.gatewayId);
+    
+    // Set flight selections
+    setSelectedOutboundFlightId(agentResolvedSelection.outboundFlightId);
+    setSelectedInboundFlightId(agentResolvedSelection.inboundFlightId);
   };
 
   const toggleFlightExpansion = (flightId: string, e: React.MouseEvent) => {
@@ -575,6 +1501,22 @@ export function FlightOptionsResultsScreen({
 
     if (!outboundFlight || !inboundFlight) {
       return;
+    }
+    
+    // Check if user accepted agent pick
+    const isAgentPick = agentResolvedSelection && 
+      agentResolvedSelection.gatewayId === selectedGatewayId &&
+      agentResolvedSelection.outboundFlightId === selectedOutboundFlightId &&
+      agentResolvedSelection.inboundFlightId === selectedInboundFlightId;
+    
+    if (isAgentPick && agentResolvedSelection) {
+      // Track success and show encouragement
+      const newCount = trackAgentDecisionSuccess();
+      setAgentSuccessCount(newCount);
+      const message = getEncouragementMessage('flight', agentResolvedSelection.priorityUsed, newCount);
+      if (message) {
+        setEncouragementMessage(message);
+      }
     }
     
     // Store selected flights
@@ -685,7 +1627,7 @@ export function FlightOptionsResultsScreen({
       
       <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-[120px] pb-20 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
         {/* Page Title */}
-        <div className="text-center mb-14">
+        <div className="text-center mb-8 relative">
           <h1 className="text-lg md:text-xl font-medium text-gray-900 mb-2">
             Review flight options
           </h1>
@@ -695,21 +1637,200 @@ export function FlightOptionsResultsScreen({
           <p className="text-sm text-gray-600">
             Choose a city to fly into and out of to continue.
           </p>
+          
+          {/* Main Compass Icon - Top Right */}
+          {flightPriorityGuidance && (
+            <div className="absolute top-0 right-0 relative">
+              <motion.button
+                type="button"
+                onClick={() => setShowPriorityGuidance(!showPriorityGuidance)}
+                className="flex items-center justify-center cursor-pointer transition-transform hover:scale-110"
+                aria-label="Get flight guidance"
+                initial={{ x: 0, y: 0, rotate: 0 }}
+                animate={
+                  agentSuccessCount >= 2
+                    ? {
+                        scale: [1, 1.05, 1, 1.05, 1],
+                        transition: {
+                          duration: 2,
+                          repeat: Infinity,
+                          ease: "easeInOut",
+                        },
+                      }
+                    : {
+                        x: [0, -2, 2, -2, 2, -1, 1, 0],
+                        y: [0, -1, 1, -1, 1, 0],
+                        rotate: [0, -3, 3, -3, 3, 0],
+                      }
+                }
+                transition={
+                  agentSuccessCount >= 2
+                    ? {
+                        duration: 2,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                      }
+                    : {
+                        duration: 2,
+                        times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1],
+                        ease: "easeInOut",
+                        repeat: Infinity,
+                        repeatDelay: 1,
+                      }
+                }
+              >
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40">
+                  <Compass className="w-6 h-6 text-white" />
+                </div>
+              </motion.button>
+              {/* Encouragement Message */}
+              {encouragementMessage && (
+                <AgentEncouragementMessage
+                  message={encouragementMessage}
+                  onDismiss={() => setEncouragementMessage(null)}
+                />
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Page-level Flight Priority Guidance */}
+        {flightPriorityGuidance && showPriorityGuidance && (
+          <section className="mb-8 p-4 rounded-xl bg-gradient-to-br from-[#FFF5F4] via-white to-[#FFF5F4] border border-[#FED7D2] shadow-sm">
+            <p className={`text-sm text-[#4B5563] ${flightPriorityGuidance.priorities.length > 0 ? 'mb-3' : ''}`}>
+              {flightPriorityGuidance.brief}
+            </p>
+            {/* Watchful message after 4+ successes (once per session) */}
+            {shouldShowWatchfulMsg && (
+              <p className="text-xs text-[#6B7280] italic mt-3 pt-3 border-t border-orange-200">
+                {getWatchfulMessage()}
+              </p>
+            )}
+            {/* Only render priorities if array is not empty */}
+            {flightPriorityGuidance.priorities.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {flightPriorityGuidance.priorities.map((priority) => {
+                  const isSelected = selectedFlightPriority === priority.id;
+                  return (
+                    <button
+                      key={priority.id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedFlightPriority(
+                          selectedFlightPriority === priority.id ? null : priority.id
+                        )
+                      }
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
+                        isSelected
+                          ? 'bg-[#FE4C40] text-white border-[#FE4C40]'
+                          : 'bg-white text-[#374151] border-[#E5E7EB] hover:border-[#FE4C40]'
+                      }`}
+                    >
+                      <div className="font-medium">{priority.label}</div>
+                      <div className="text-[11px] opacity-80">{priority.helper}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Agent Pick Section - Shows after priority is selected */}
+            {selectedFlightPriority && agentResolvedSelection && (() => {
+              const resolvedGateway = gatewayOptions.find(g => g.id === agentResolvedSelection.gatewayId);
+              const resolvedOutbound = resolvedGateway?.outbound.flights.find(f => f.id === agentResolvedSelection.outboundFlightId);
+              const resolvedInbound = resolvedGateway?.inbound.flights.find(f => f.id === agentResolvedSelection.inboundFlightId);
+              
+              if (!resolvedGateway || !resolvedOutbound || !resolvedInbound) {
+                return null;
+              }
+
+              const outboundTimeInfo = formatFlightTimeDisplay(resolvedOutbound, resolvedGateway.outbound.date);
+              const inboundTimeInfo = formatFlightTimeDisplay(resolvedInbound, resolvedGateway.inbound.date);
+              const explanation = generateRecommendationExplanation(
+                agentResolvedSelection.priorityUsed,
+                resolvedOutbound,
+                resolvedInbound
+              );
+
+              const priorityLabel = flightPriorityGuidance?.priorities.find(p => p.id === agentResolvedSelection.priorityUsed)?.label || agentResolvedSelection.priorityUsed;
+
+              return (
+                <div className="mt-4 pt-4 border-t border-orange-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Compass className="w-5 h-5 text-orange-500" />
+                    <h3 className="text-sm font-semibold text-[#1F2937]">WanderWise Agent Pick</h3>
+                  </div>
+                  
+                  <div className="space-y-2 text-xs text-[#4B5563] mb-3">
+                    <button
+                      type="button"
+                      onClick={() => scrollToFlightCard(resolvedOutbound.id, true)}
+                      className="w-full text-left hover:text-orange-600 transition-colors"
+                    >
+                      <span className="font-medium">Outbound:</span>{' '}
+                      <span className="text-[#1F2937]">{resolvedGateway.outbound.gatewayCity}</span>
+                      {' | '}
+                      <span className="text-[#1F2937]">{resolvedOutbound.airline || resolvedOutbound.airlineName || 'Multiple Airlines'}</span>
+                      {' · '}
+                      <span className="text-[#1F2937]">{outboundTimeInfo.formattedDeparture}</span>
+                      {' → '}
+                      <span className="text-[#1F2937]">{outboundTimeInfo.formattedArrival}</span>
+                      {' · '}
+                      <span className="text-[#1F2937]">{formatStopInfo(resolvedOutbound)}</span>
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={() => scrollToFlightCard(resolvedInbound.id, false)}
+                      className="w-full text-left hover:text-orange-600 transition-colors"
+                    >
+                      <span className="font-medium">Inbound:</span>{' '}
+                      <span className="text-[#1F2937]">{resolvedGateway.inbound.gatewayCity}</span>
+                      {' | '}
+                      <span className="text-[#1F2937]">{resolvedInbound.airline || resolvedInbound.airlineName || 'Multiple Airlines'}</span>
+                      {' · '}
+                      <span className="text-[#1F2937]">{inboundTimeInfo.formattedDeparture}</span>
+                      {' → '}
+                      <span className="text-[#1F2937]">{inboundTimeInfo.formattedArrival}</span>
+                      {' · '}
+                      <span className="text-[#1F2937]">{formatStopInfo(resolvedInbound)}</span>
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-[#6B7280] italic mb-3">
+                    Chosen because you prioritized <span className="font-medium text-[#1F2937]">{priorityLabel.toLowerCase()}</span>. 
+                    This gives you {explanation.mainBenefit}, with {explanation.acceptedTradeoff}.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleSelectResolvedFlights}
+                    className="w-full px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    Select these flights
+                  </button>
+                </div>
+              );
+            })()}
+          </section>
+        )}
 
         {/* Gateway Options */}
         <div className="space-y-4 mb-6">
           {gatewayOptions.map((gateway) => {
             const isSelected = selectedGatewayId === gateway.id;
             const isExpanded = expandedGatewayId === gateway.id;
+            const isResolved = agentResolvedSelection?.gatewayId === gateway.id;
 
             return (
               <div
                 key={gateway.id}
-                className={`bg-white rounded-xl border overflow-hidden transition-all ${
-                  isSelected 
-                    ? 'border-[#FE4C40]/50 shadow-md bg-[#FFF5F4]/30' 
-                    : 'border-gray-200 shadow-sm hover:shadow-md'
+                className={`bg-white rounded-xl border-2 overflow-hidden transition-all ${
+                  isResolved
+                    ? 'border-orange-500 bg-gradient-to-br from-orange-50 to-white shadow-lg shadow-orange-200'
+                    : isSelected 
+                    ? 'border-[#FE4C40] bg-gradient-to-br from-[#FFF5F4] to-white shadow-lg' 
+                    : 'border-gray-200 bg-white hover:border-[#FE4C40] shadow-sm hover:shadow-md'
                 }`}
               >
                 {/* Gateway Card Header */}
@@ -736,9 +1857,40 @@ export function FlightOptionsResultsScreen({
                           </div>
                         </div>
                         {isSelected && (
-                          <Check className="w-5 h-5 text-[#FE4C40]" />
-                  )}
-                    </div>
+                          <div className="w-6 h-6 rounded-full bg-[#FE4C40] text-white flex items-center justify-center text-sm flex-shrink-0">
+                            ✓
+                          </div>
+                        )}
+                        {/* Agent Resolved Indicator */}
+                        {isResolved && (
+                          <div className="flex items-center gap-1.5 ml-2">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40">
+                              <Compass className="w-4 h-4 text-white" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Agent Resolved Confirmation Copy */}
+                      {isResolved && agentResolvedSelection && (() => {
+                        const resolvedGateway = gatewayOptions.find(g => g.id === agentResolvedSelection.gatewayId);
+                        const resolvedOutbound = resolvedGateway?.outbound.flights.find(f => f.id === agentResolvedSelection.outboundFlightId);
+                        const resolvedInbound = resolvedGateway?.inbound.flights.find(f => f.id === agentResolvedSelection.inboundFlightId);
+                        if (resolvedGateway && resolvedOutbound && resolvedInbound) {
+                          const confirmationCopy = generateConfirmationCopy(
+                            agentResolvedSelection.priorityUsed,
+                            resolvedGateway,
+                            resolvedOutbound,
+                            resolvedInbound
+                          );
+                          return (
+                            <div className="mt-2 pl-2 text-xs text-orange-700 italic border-l-2 border-orange-300">
+                              {confirmationCopy}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {/* Gateway Summary */}
                       <div className="space-y-1 text-sm text-[#6B7280]">
@@ -746,38 +1898,41 @@ export function FlightOptionsResultsScreen({
                           <div className="flex items-center gap-1">
                             <DollarSign className="w-4 h-4" />
                             <span>From {formatPriceInINR(gateway.score.totalPrice)}</span>
-                        </div>
-                )}
+                          </div>
+                        )}
                         {gateway.score.totalTravelTimeMinutes && (
                           <div className="flex items-center gap-1">
                             <Clock className="w-4 h-4" />
                             <span>{Math.round(gateway.score.totalTravelTimeMinutes / 60)}h {gateway.score.totalTravelTimeMinutes % 60}m total</span>
-                        </div>
+                          </div>
                         )}
-                    </div>
+                      </div>
 
-                      {/* Explanation */}
+                      {/* Original Gateway Explanation */}
                       {gateway.explanation && gateway.explanation.length > 0 && (
                         <div className="mt-2 text-xs text-[#6B7280]">
                           {gateway.explanation[0]}
-                      </div>
+                        </div>
                       )}
                     </div>
                     
-                    <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                        handleGatewaySelect(gateway.id);
-                      }}
-                      className="ml-2 p-1 hover:bg-gray-100 rounded"
-                    >
-                      {isExpanded ? (
-                        <ChevronUp className="w-5 h-5 text-[#6B7280]" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-[#6B7280]" />
-                      )}
-                    </button>
+                    {/* Right side: Expand/Collapse button */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleGatewaySelect(gateway.id);
+                        }}
+                        className="p-1 hover:bg-gray-100 rounded"
+                      >
+                        {isExpanded ? (
+                          <ChevronUp className="w-5 h-5 text-[#6B7280]" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-[#6B7280]" />
+                        )}
+                      </button>
                     </div>
+                  </div>
                   </div>
 
                 {/* Expanded Flight Lists */}
@@ -793,23 +1948,6 @@ export function FlightOptionsResultsScreen({
                       </div>
                     </div>
 
-                    {/* AI Explanation */}
-                    {isLoadingExplanation && (
-                      <div className="p-4 bg-gradient-to-br from-orange-100 to-pink-100 border border-orange-200 rounded-lg">
-                        <div className="flex items-center gap-2">
-                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-orange-500 border-t-transparent"></div>
-                          <p className="text-sm text-orange-900">Getting personalized insights...</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {!isLoadingExplanation && aiExplanation && (
-                      <div className="p-4 bg-gradient-to-br from-orange-100 to-pink-100 border border-orange-200 rounded-lg">
-                        <p className="text-sm text-gray-900 leading-relaxed">
-                          {aiExplanation.summary}
-                        </p>
-                      </div>
-                    )}
 
                     {/* Sort Control */}
                     <div>
@@ -839,14 +1977,19 @@ export function FlightOptionsResultsScreen({
                         {sortFlights(gateway.outbound.flights).map((flight) => {
                           const isFlightSelected = selectedOutboundFlightId === flight.id;
                           const isExpanded = expandedFlightIds.has(flight.id);
+                          const isResolved = agentResolvedSelection?.gatewayId === gateway.id && 
+                                           agentResolvedSelection?.outboundFlightId === flight.id;
                           const timeInfo = formatFlightTimeDisplay(flight, gateway.outbound.date);
                           return (
                             <div
+                              id={`flight-outbound-${flight.id}`}
                               key={flight.id}
-                              className={`rounded-xl border transition-all ${
-                                isFlightSelected
-                                  ? 'border-[#FE4C40]/50 bg-[#FFF5F4]/50 shadow-sm'
-                                  : 'border-gray-200 hover:border-gray-300 bg-white'
+                              className={`rounded-xl border-2 transition-all ${
+                                isResolved
+                                  ? 'border-orange-500 bg-gradient-to-br from-orange-50 to-white shadow-lg shadow-orange-200'
+                                  : isFlightSelected
+                                  ? 'border-[#FE4C40] bg-gradient-to-br from-[#FFF5F4] to-white shadow-lg'
+                                  : 'border-gray-200 bg-white hover:border-[#FE4C40]'
                               }`}
                             >
                               <div
@@ -860,7 +2003,14 @@ export function FlightOptionsResultsScreen({
                                         {flight.airline || flight.airlineName || 'Multiple Airlines'}
                                       </span>
                                       {isFlightSelected && (
-                                        <Check className="w-4 h-4 text-[#FE4C40] flex-shrink-0" />
+                                        <div className="w-5 h-5 rounded-full bg-[#FE4C40] text-white flex items-center justify-center text-xs flex-shrink-0">
+                                          ✓
+                                        </div>
+                                      )}
+                                      {isResolved && (
+                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40">
+                                          <Compass className="w-3.5 h-3.5 text-white" />
+                                        </div>
                                       )}
                                     </div>
                                     <div className="space-y-1">
@@ -880,10 +2030,7 @@ export function FlightOptionsResultsScreen({
                                     <div className="text-xl font-bold text-[#1F2937]">
                                       {formatPriceInINR(flight.price)}
                                     </div>
-                                    <div className="flex flex-col items-end gap-0.5">
-                                      {flight.recommended && (
-                                        <div className="text-xs font-medium text-[#FE4C40]">Recommended</div>
-                                      )}
+                                    <div className="flex items-center gap-1.5">
                                       {!flight.recommended && flight.cheapest && (
                                         <div className="text-xs text-[#10B981]">Cheapest</div>
                                       )}
@@ -893,11 +2040,6 @@ export function FlightOptionsResultsScreen({
                                     </div>
                                   </div>
                                 </div>
-                                {flight.recommended && flight.explanation && (
-                                  <div className="mt-2 text-xs text-[#6B7280] italic">
-                                    {flight.explanation}
-                                  </div>
-                                )}
                               </div>
                               
                               {/* Expandable Section */}
@@ -948,14 +2090,19 @@ export function FlightOptionsResultsScreen({
                         {sortFlights(gateway.inbound.flights).map((flight) => {
                           const isFlightSelected = selectedInboundFlightId === flight.id;
                           const isExpanded = expandedFlightIds.has(flight.id);
+                          const isResolved = agentResolvedSelection?.gatewayId === gateway.id && 
+                                           agentResolvedSelection?.inboundFlightId === flight.id;
                           const timeInfo = formatFlightTimeDisplay(flight, gateway.inbound.date);
                           return (
                             <div
+                              id={`flight-inbound-${flight.id}`}
                               key={flight.id}
-                              className={`rounded-xl border transition-all ${
-                                isFlightSelected
-                                  ? 'border-[#FE4C40]/50 bg-[#FFF5F4]/50 shadow-sm'
-                                  : 'border-gray-200 hover:border-gray-300 bg-white'
+                              className={`rounded-xl border-2 transition-all ${
+                                isResolved
+                                  ? 'border-orange-500 bg-gradient-to-br from-orange-50 to-white shadow-lg shadow-orange-200'
+                                  : isFlightSelected
+                                  ? 'border-[#FE4C40] bg-gradient-to-br from-[#FFF5F4] to-white shadow-lg'
+                                  : 'border-gray-200 bg-white hover:border-[#FE4C40]'
                               }`}
                             >
                               <div
@@ -969,7 +2116,14 @@ export function FlightOptionsResultsScreen({
                                         {flight.airline || flight.airlineName || 'Multiple Airlines'}
                                       </span>
                                       {isFlightSelected && (
-                                        <Check className="w-4 h-4 text-[#FE4C40] flex-shrink-0" />
+                                        <div className="w-5 h-5 rounded-full bg-[#FE4C40] text-white flex items-center justify-center text-xs flex-shrink-0">
+                                          ✓
+                                        </div>
+                                      )}
+                                      {isResolved && (
+                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40">
+                                          <Compass className="w-3.5 h-3.5 text-white" />
+                                        </div>
                                       )}
                                     </div>
                                     <div className="space-y-1">
@@ -989,10 +2143,7 @@ export function FlightOptionsResultsScreen({
                                     <div className="text-xl font-bold text-[#1F2937]">
                                       {formatPriceInINR(flight.price)}
                                     </div>
-                                    <div className="flex flex-col items-end gap-0.5">
-                                      {flight.recommended && (
-                                        <div className="text-xs font-medium text-[#FE4C40]">Recommended</div>
-                                      )}
+                                    <div className="flex items-center gap-1.5">
                                       {!flight.recommended && flight.cheapest && (
                                         <div className="text-xs text-[#10B981]">Cheapest</div>
                                       )}
@@ -1002,11 +2153,6 @@ export function FlightOptionsResultsScreen({
                                     </div>
                                   </div>
                                 </div>
-                                {flight.recommended && flight.explanation && (
-                                  <div className="mt-2 text-xs text-[#6B7280] italic">
-                                    {flight.explanation}
-                                  </div>
-                                )}
                               </div>
                               
                               {/* Expandable Section */}

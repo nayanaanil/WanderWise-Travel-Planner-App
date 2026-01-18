@@ -16,10 +16,158 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { GatewayFlightsRequest, GatewayFlightsResponse, GatewayOption } from '@/lib/phase1/types';
+import { GatewayFlightsRequest, GatewayFlightsResponse, GatewayOption, GatewayContext } from '@/lib/phase1/types';
 import { resolveGatewayCandidates } from '@/lib/phase1/gatewayResolution';
 import { searchGatewayFlights } from '@/lib/phase1/flightSearch';
 import { computeGatewayOptionScore, scoreGatewayOption, generateExplanation, rankAndFilterFlights } from '@/lib/phase1/scoring';
+
+/**
+ * Derives gatewayContext for a single gateway option.
+ * 
+ * This is a deterministic derivation that:
+ * - Calculates rank (1-3) from position in sorted array
+ * - Ranks strengths (best/good/weak) for price, time, and reliability
+ * - Identifies primary tradeoff (weakest dimension)
+ * - Determines resolution type (direct vs resolved from another city)
+ */
+function deriveGatewayContext(
+  gateway: GatewayOption,
+  allTopOptions: GatewayOption[],
+  draftStopCities: string[],
+  rank: number // 1-based rank (1 = best, 2 = second, 3 = third)
+): GatewayContext {
+  const gatewayCity = gateway.outbound.gatewayCity;
+  
+  // Derive strengths by ranking each gateway separately for each dimension
+  // Rank 0 = best, 1 = middle, 2 = worst
+  const sortedByPrice = [...allTopOptions].sort((a, b) => {
+    const priceA = a.score.totalPrice ?? Number.MAX_SAFE_INTEGER;
+    const priceB = b.score.totalPrice ?? Number.MAX_SAFE_INTEGER;
+    return priceA - priceB; // Lower price = better
+  });
+  
+  const sortedByTime = [...allTopOptions].sort((a, b) => {
+    const timeA = a.score.totalTravelTimeMinutes ?? Number.MAX_SAFE_INTEGER;
+    const timeB = b.score.totalTravelTimeMinutes ?? Number.MAX_SAFE_INTEGER;
+    return timeA - timeB; // Lower time = better
+  });
+  
+  const sortedByReliability = [...allTopOptions].sort((a, b) => {
+    const relA = a.score.reliabilityScore ?? 0;
+    const relB = b.score.reliabilityScore ?? 0;
+    return relB - relA; // Higher reliability = better
+  });
+  
+  // Find position in each sorted array (0 = best, 1 = middle, 2 = worst)
+  const priceRank = sortedByPrice.findIndex(g => g.id === gateway.id);
+  const timeRank = sortedByTime.findIndex(g => g.id === gateway.id);
+  const reliabilityRank = sortedByReliability.findIndex(g => g.id === gateway.id);
+  
+  // Map rank to strength: 0 = "best", 1 = "good", 2 = "weak"
+  const rankToStrength = (rank: number): "best" | "good" | "weak" => {
+    if (rank === 0) return "best";
+    if (rank === 1) return "good";
+    return "weak";
+  };
+  
+  const strengths = {
+    price: rankToStrength(priceRank),
+    time: rankToStrength(timeRank),
+    reliability: rankToStrength(reliabilityRank),
+  };
+  
+  // Derive tradeoff: identify the weakest dimension
+  // Find the gateway that is "best" in each dimension
+  const bestPriceGateway = sortedByPrice[0];
+  const bestTimeGateway = sortedByTime[0];
+  const bestReliabilityGateway = sortedByReliability[0];
+  
+  // Determine which dimension is weakest for this gateway
+  const weaknesses: Array<{ dimension: "price" | "time" | "reliability"; strength: "good" | "weak" }> = [];
+  if (strengths.price !== "best") {
+    weaknesses.push({ dimension: "price", strength: strengths.price });
+  }
+  if (strengths.time !== "best") {
+    weaknesses.push({ dimension: "time", strength: strengths.time });
+  }
+  if (strengths.reliability !== "best") {
+    weaknesses.push({ dimension: "reliability", strength: strengths.reliability });
+  }
+  
+  // If no weaknesses (this is best in all dimensions), use balanced message
+  let tradeoff: { comparedTo: "price" | "time" | "reliability"; description: string };
+  if (weaknesses.length === 0) {
+    tradeoff = {
+      comparedTo: "price", // Default, but description indicates balance
+      description: "Best overall balance",
+    };
+  } else {
+    // Prioritize "weak" over "good" weaknesses
+    weaknesses.sort((a, b) => {
+      if (a.strength === "weak" && b.strength !== "weak") return -1;
+      if (a.strength !== "weak" && b.strength === "weak") return 1;
+      return 0;
+    });
+    
+    const primaryWeakness = weaknesses[0];
+    const bestInDimension = 
+      primaryWeakness.dimension === "price" ? bestPriceGateway :
+      primaryWeakness.dimension === "time" ? bestTimeGateway :
+      bestReliabilityGateway;
+    
+    // Generate factual description comparing to the best option in that dimension
+    const bestCity = bestInDimension.outbound.gatewayCity;
+    let description: string;
+    
+    if (primaryWeakness.dimension === "price") {
+      if (primaryWeakness.strength === "weak") {
+        description = `Significantly higher price than ${bestCity}`;
+      } else {
+        description = `Slightly higher price than ${bestCity}`;
+      }
+    } else if (primaryWeakness.dimension === "time") {
+      if (primaryWeakness.strength === "weak") {
+        description = `Longer travel time than ${bestCity}`;
+      } else {
+        description = `Slightly longer travel time than ${bestCity}`;
+      }
+    } else {
+      // reliability
+      if (primaryWeakness.strength === "weak") {
+        description = `Fewer flight options or more stops than ${bestCity}`;
+      } else {
+        description = `Slightly fewer options than ${bestCity}`;
+      }
+    }
+    
+    tradeoff = {
+      comparedTo: primaryWeakness.dimension,
+      description,
+    };
+  }
+  
+  // Derive resolution: check if gateway city exists in original draft stops
+  // Case-insensitive comparison for robustness
+  const draftStopCitiesLower = draftStopCities.map(c => c.toLowerCase().trim());
+  const gatewayCityLower = gatewayCity.toLowerCase().trim();
+  const isDirect = draftStopCitiesLower.includes(gatewayCityLower);
+  
+  const resolution: GatewayContext['resolution'] = isDirect
+    ? { type: "direct" }
+    : {
+        type: "resolved",
+        // Use first draft stop as original city (deterministic fallback)
+        originalCity: draftStopCities.length > 0 ? draftStopCities[0] : undefined,
+      };
+  
+  return {
+    city: gatewayCity,
+    rank,
+    strengths,
+    tradeoff,
+    resolution,
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -184,13 +332,27 @@ export async function POST(request: NextRequest) {
     // Limit to top N options (N = 3 for MVP)
     const topOptions = gatewayOptions.slice(0, 3);
     
+    // Step 5: Derive gatewayContext for each top option
+    // Extract draft stop cities for resolution checking
+    const draftStopCities = body.draftStops.map(stop => stop.city);
+    
+    // Derive and attach gatewayContext to each option
+    const enrichedOptions = topOptions.map((option, index) => {
+      const rank = index + 1; // 1-based rank (1 = best, 2 = second, 3 = third)
+      const context = deriveGatewayContext(option, topOptions, draftStopCities, rank);
+      return {
+        ...option,
+        gatewayContext: context,
+      };
+    });
+    
     console.debug('[DEBUG][Phase1] Returning gateway options', {
       total: gatewayOptions.length,
-      returned: topOptions.length
+      returned: enrichedOptions.length
     });
     
     const response: GatewayFlightsResponse = {
-      gatewayOptions: topOptions,
+      gatewayOptions: enrichedOptions,
     };
     
     return NextResponse.json(response, { status: 200 });

@@ -1,11 +1,10 @@
 /**
  * Itinerary Image Resolution Utilities
  *
- * Single source of truth for resolving itinerary image URLs
- * from the static `itineraryImageMap` (Vercel Blob URLs).
+ * Single source of truth for resolving Vercel blob image URLs
+ * from itineraryImageMap (Vercel blob storage)
  */
-
-import { itineraryImageMap } from './itineraryImageMap';
+import { itineraryImageMap } from "./itineraryImageMap";
 
 interface ItineraryImageContext {
   themeSlug?: string;
@@ -15,69 +14,109 @@ interface ItineraryImageContext {
 }
 
 /**
- * Resolve image URL from itinerary metadata via itineraryImageMap.
+ * Resolve image URL from itinerary metadata using Vercel blob storage
  *
- * Resolution priority:
- * 1. themeSlug → `_themes/${themeSlug}`
- * 2. theme (converted to slug) → `_themes/${slug}`
- * 3. imageFolder (used as-is as a key)
- * 4. primaryCountryCode
- * 5. `_default`
+ * Priority order:
+ * 1. Theme slug (explicit)
+ * 2. Theme (converted to slug)
+ * 3. imageFolder (AI-selected, supports both country codes and theme folders)
+ * 4. primaryCountryCode (legacy support)
+ * 5. Default fallback
  *
- * The final index is clamped to the available images for the resolved key.
+ * Returns Vercel blob URL from itineraryImageMap
  */
 export function getItineraryImagePath(
   context: ItineraryImageContext,
   imageIndex: number = 1
 ): string {
-  const themeSlug = context?.themeSlug;
-  const theme = context?.theme;
-  const imageFolder = context?.imageFolder;
-  const primaryCountryCode = context?.primaryCountryCode;
-
-  // Determine the initial key based on priority
-  let resolvedKey: string;
-
-  if (themeSlug) {
-    resolvedKey = `_themes/${themeSlug}`;
-  } else if (theme) {
-    const derivedSlug = theme.toLowerCase().replace(/\s+/g, '-');
-    resolvedKey = `_themes/${derivedSlug}`;
-  } else if (imageFolder) {
-    resolvedKey = imageFolder;
-  } else if (primaryCountryCode) {
-    resolvedKey = primaryCountryCode;
-  } else {
-    resolvedKey = '_default';
-  }
-
-  let images = itineraryImageMap[resolvedKey];
-
-  // If no images for resolvedKey, fall back to _default
-  if (!images || images.length === 0) {
-    resolvedKey = '_default';
-    images = itineraryImageMap[resolvedKey] || [];
-  }
-
-  let resolvedUrl = '';
-
-  if (images && images.length > 0) {
-    // Clamp 1-based imageIndex into the valid range
-    const zeroBasedIndex = Math.max(0, imageIndex - 1);
-    const clampedIndex = Math.min(zeroBasedIndex, images.length - 1);
-    resolvedUrl = images[clampedIndex];
-  }
-
-  console.log('[IMAGE_MAP_RESOLVE]', {
-    themeSlug,
-    imageFolder,
-    primaryCountryCode,
-    resolvedKey,
+  console.log('[IMAGE_RESOLVER_INPUT]', {
     imageIndex,
-    resolvedUrl,
+    themeSlug: context?.themeSlug,
+    theme: context?.theme,
+    imageFolder: context?.imageFolder,
+    primaryCountryCode: context?.primaryCountryCode,
   });
 
-  return resolvedUrl;
+  // Helper to get blob URL from map
+  const getBlobUrl = (key: string, index: number): string | null => {
+    const images = itineraryImageMap[key];
+    if (!images || images.length === 0) {
+      return null;
+    }
+    // imageIndex is 1-based, array is 0-based
+    const arrayIndex = Math.min(index - 1, images.length - 1);
+    return images[arrayIndex] || null;
+  };
+
+  // Priority 1: Theme slug (explicit)
+  if (context.themeSlug) {
+    const mapKey = `_themes/${context.themeSlug}`;
+    const blobUrl = getBlobUrl(mapKey, imageIndex);
+    if (blobUrl) {
+      console.log('[IMAGE_RESOLVER_BRANCH]', 'themeSlug', context.themeSlug);
+      console.log('[IMAGE_RESOLVER_OUTPUT]', blobUrl);
+      return blobUrl;
+    }
+  }
+
+  // Priority 2: Theme (convert to slug format)
+  if (context.theme) {
+    const themeSlug = context.theme.toLowerCase().replace(/\s+/g, '-');
+    const mapKey = `_themes/${themeSlug}`;
+    const blobUrl = getBlobUrl(mapKey, imageIndex);
+    if (blobUrl) {
+      console.log('[IMAGE_RESOLVER_BRANCH]', 'theme', context.theme);
+      console.log('[IMAGE_RESOLVER_OUTPUT]', blobUrl);
+      return blobUrl;
+    }
+  }
+
+  // Priority 3: imageFolder (AI-selected folder, handles both country codes and theme folders)
+  if (context.imageFolder) {
+    // Check if it's a theme folder (contains hyphen and is not _default)
+    if (context.imageFolder.includes('-') && context.imageFolder !== '_default') {
+      const mapKey = `_themes/${context.imageFolder}`;
+      const blobUrl = getBlobUrl(mapKey, imageIndex);
+      if (blobUrl) {
+        console.log('[IMAGE_RESOLVER_BRANCH]', 'themeFolder', context.imageFolder);
+        console.log('[IMAGE_RESOLVER_OUTPUT]', blobUrl);
+        return blobUrl;
+      }
+    }
+    // Otherwise treat as country code or _default
+    const mapKey = context.imageFolder === '_default' ? '_default' : context.imageFolder.toUpperCase();
+    const blobUrl = getBlobUrl(mapKey, imageIndex);
+    if (blobUrl) {
+      console.log('[IMAGE_RESOLVER_BRANCH]', 'imageFolder', context.imageFolder);
+      console.log('[IMAGE_RESOLVER_OUTPUT]', blobUrl);
+      return blobUrl;
+    }
+  }
+
+  // Priority 4: Country code (legacy support)
+  if (context.primaryCountryCode) {
+    const mapKey = context.primaryCountryCode.toUpperCase();
+    const blobUrl = getBlobUrl(mapKey, imageIndex);
+    if (blobUrl) {
+      console.log('[IMAGE_RESOLVER_BRANCH]', 'primaryCountryCode', context.primaryCountryCode);
+      console.log('[IMAGE_RESOLVER_OUTPUT]', blobUrl);
+      return blobUrl;
+    }
+  }
+
+  // Priority 5: Default fallback (always uses index 1)
+  const defaultBlobUrl = getBlobUrl('_default', 1);
+  if (defaultBlobUrl) {
+    console.log('[IMAGE_RESOLVER_BRANCH]', 'DEFAULT');
+    console.log('[IMAGE_RESOLVER_OUTPUT]', defaultBlobUrl);
+    return defaultBlobUrl;
+  }
+
+  // Ultimate fallback if _default is not in map (should not happen)
+  const ultimateFallback = 'https://hegvp3kaqm660g9n.public.blob.vercel-storage.com/_default1/1.jpg';
+  console.log('[IMAGE_RESOLVER_BRANCH]', 'ULTIMATE_FALLBACK');
+  console.log('[IMAGE_RESOLVER_OUTPUT]', ultimateFallback);
+  return ultimateFallback;
 }
 
 /**
@@ -93,4 +132,3 @@ export function getItineraryImagePaths(
   }
   return paths;
 }
-

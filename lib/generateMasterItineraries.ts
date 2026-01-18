@@ -21,10 +21,12 @@ export interface DraftItinerary {
   whyThisTrip?: string[]; // Array of exactly 3 differentiating bullet points
   primaryCountryCode?: string; // ISO country code for image resolution (e.g., "MA", "FR")
   imageFolder?: string; // AI-selected image folder when primaryCountryCode is missing (e.g., "FR", "european-christmas-markets", "_default")
+  isBestMatch?: boolean; // Whether this itinerary is the best match for the user
 }
 
 interface DraftItinerariesResponse {
   itineraries: DraftItinerary[];
+  evaluationSummary?: string;
 }
 
 // Global flag to prevent concurrent generation calls
@@ -94,34 +96,141 @@ export async function generateMasterItineraries(): Promise<DraftItinerary[]> {
       // Extract primaryCountryCode from destination
       let primaryCountryCode: string | undefined;
       
+      console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_START]', {
+        destination: tripState.destination?.value,
+        destinationType: tripState.destination?.type,
+        hasCityObject: !!tripState.destination?.city,
+        cityCountryCode: tripState.destination?.city?.countryCode,
+      });
+      
       // Priority 1: If destination has a city object with countryCode, use it
       if (tripState.destination?.city?.countryCode) {
         primaryCountryCode = tripState.destination.city.countryCode;
+        console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_FOUND]', {
+          source: 'city.countryCode',
+          primaryCountryCode,
+        });
       }
       // Priority 2: If destination type is "searchPhrase" (could be a country), look it up
       else if (tripState.destination?.type === 'searchPhrase') {
-        // Fetch countries list to look up country code
-        try {
-          const countriesResponse = await fetch('/api/cities?q=');
-          if (countriesResponse.ok) {
-            const countriesData = await countriesResponse.json();
-            const countries = countriesData.countries || [];
-            const destinationValue = tripState.destination.value;
-            
-            // Find matching country (case-insensitive)
-            const matchedCountry = countries.find((c: any) => 
-              c.name.toLowerCase() === destinationValue.toLowerCase()
-            );
-            
-            if (matchedCountry?.countryCode) {
-              primaryCountryCode = matchedCountry.countryCode;
+        console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_LOOKUP]', {
+          destination: tripState.destination.value,
+          attemptingCountryLookup: true,
+        });
+        
+        const destinationValue = tripState.destination.value;
+        
+        // First, try a direct country name mapping (faster and more reliable)
+        const countryNameToCode: Record<string, string> = {
+          'netherlands': 'NL',
+          'united kingdom': 'GB',
+          'uk': 'GB',
+          'united states': 'US',
+          'usa': 'US',
+          'france': 'FR',
+          'spain': 'ES',
+          'italy': 'IT',
+          'germany': 'DE',
+          'japan': 'JP',
+          'thailand': 'TH',
+          'indonesia': 'ID',
+          'greece': 'GR',
+          'switzerland': 'CH',
+          'austria': 'AT',
+          'portugal': 'PT',
+          'turkey': 'TR',
+          'canada': 'CA',
+          'australia': 'AU',
+          'new zealand': 'NZ',
+          'singapore': 'SG',
+          'united arab emirates': 'AE',
+          'uae': 'AE',
+          'maldives': 'MV',
+          'south africa': 'ZA',
+          'mexico': 'MX',
+          'egypt': 'EG',
+          'india': 'IN',
+        };
+        
+        const normalizedDestination = destinationValue.toLowerCase().trim();
+        const directMatch = countryNameToCode[normalizedDestination];
+        
+        if (directMatch) {
+          primaryCountryCode = directMatch;
+          console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_MATCHED]', {
+            source: 'directMapping',
+            matchedCountry: destinationValue,
+            primaryCountryCode,
+          });
+        } else {
+          // Fallback: Try API lookup
+          console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_API_FALLBACK]', {
+            destinationValue,
+            reason: 'not in direct mapping, trying API',
+          });
+          
+          try {
+            // Use the destination as query to search for countries
+            const countriesResponse = await fetch(`/api/cities?q=${encodeURIComponent(destinationValue)}`);
+            if (countriesResponse.ok) {
+              const countriesData = await countriesResponse.json();
+              // The API returns all results (countries, regions, cities) in a single array
+              // Filter for countries only
+              const countries = (countriesData.cities || []).filter((c: any) => c.type === 'country');
+              
+              console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_SEARCH]', {
+                destinationValue,
+                countriesCount: countries.length,
+                searchingFor: destinationValue.toLowerCase(),
+                allResultsCount: countriesData.cities?.length || 0,
+              });
+              
+              // Find matching country (case-insensitive, also try partial matches)
+              const matchedCountry = countries.find((c: any) => {
+                const countryName = c.name?.toLowerCase() || '';
+                const searchValue = destinationValue.toLowerCase();
+                return countryName === searchValue || 
+                       countryName.includes(searchValue) || 
+                       searchValue.includes(countryName);
+              });
+              
+              if (matchedCountry?.countryCode) {
+                primaryCountryCode = matchedCountry.countryCode;
+                console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_MATCHED]', {
+                  source: 'apiLookup',
+                  matchedCountry: matchedCountry.name,
+                  primaryCountryCode,
+                });
+              } else {
+                console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_NO_MATCH]', {
+                  destinationValue,
+                  searchedIn: countries.length,
+                  sampleCountries: countries.slice(0, 5).map((c: any) => c.name),
+                });
+              }
+            } else {
+              console.warn('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_API_ERROR]', {
+                status: countriesResponse.status,
+                statusText: countriesResponse.statusText,
+              });
             }
+          } catch (error) {
+            console.error('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_LOOKUP_ERROR]', {
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
-        } catch (error) {
-          // Silent fail - primaryCountryCode remains undefined
-          console.debug('Failed to fetch countries for country code lookup:', error);
         }
+      } else {
+        console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_SKIP]', {
+          reason: 'destination type is not searchPhrase and no city object',
+          destinationType: tripState.destination?.type,
+        });
       }
+      
+      console.log('[GENERATE_MASTER_ITINERARIES_COUNTRY_CODE_FINAL]', {
+        primaryCountryCode,
+        willUseAI: !primaryCountryCode,
+      });
 
       // Prepare request body - only include explicit user intent
       // DO NOT include AI-derived fields (travelTheme, inferredRegion, aiTags)
@@ -176,6 +285,7 @@ export async function generateMasterItineraries(): Promise<DraftItinerary[]> {
       // Save to trip state
       saveTripState({
         draftItineraries: draftItineraries,
+        evaluationSummary: data.evaluationSummary,
       });
 
       console.log(`>>> GENERATION COMPLETED: ${draftItineraries.length} draft itineraries generated`);

@@ -96,8 +96,16 @@ function LocalImageCarousel({ itinerary }: { itinerary: DraftItinerary }) {
               className="w-full h-full object-cover"
               loading="lazy"
               onError={(e) => {
-                console.error('[IMAGE_LOAD_ERROR]', e.currentTarget.src);
-                e.currentTarget.src = defaultImagePath;
+                const target = e.currentTarget;
+                // Prevent infinite loops: if we've already tried a fallback, stop here
+                if (target.dataset.hasTriedFallback === 'true') {
+                  console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
+                  return;
+                }
+                console.error('[IMAGE_LOAD_ERROR]', target.src);
+                // Mark that we're trying a fallback BEFORE changing src
+                target.dataset.hasTriedFallback = 'true';
+                target.src = defaultImagePath;
               }}
             />
           </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { ChevronRight, Info } from 'lucide-react';
+import { ChevronRight, Compass } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { StepHeader } from '@/components/StepHeader';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/ui/tooltip';
 import { getTripState, saveTripState } from '@/lib/tripState';
@@ -329,15 +330,28 @@ export function TripTimingScreen({ onContinue, onBack }: TripTimingScreenProps) 
                         {data.note && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span
+                              <motion.span
                                 onClick={(e) => e.stopPropagation()}
-                                className="flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                                className="flex items-center justify-center cursor-pointer"
                                 aria-label="Climate information"
                                 role="button"
                                 tabIndex={0}
+                                initial={{ x: 0, y: 0, rotate: 0 }}
+                                animate={{
+                                  x: [0, -2, 2, -2, 2, -1, 1, 0],
+                                  y: [0, -1, 1, -1, 1, 0],
+                                  rotate: [0, -3, 3, -3, 3, 0],
+                                }}
+                                transition={{
+                                  duration: 2,
+                                  times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1],
+                                  ease: "easeInOut",
+                                }}
                               >
-                                <Info className="w-3 h-3" />
-                              </span>
+                                <div className="w-4 h-4 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-sm">
+                                  <Compass className="w-2.5 h-2.5 text-white" />
+                                </div>
+                              </motion.span>
                             </TooltipTrigger>
                             <TooltipContent
                               side="bottom"

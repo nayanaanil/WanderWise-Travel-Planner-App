@@ -26,65 +26,63 @@ export function ActivityDecisionModal({
   if (!isOpen || !decision || !explanation) return null;
 
   /**
-   * Filter options to reduce decision fatigue
-   * MAX 3 options shown, prioritized by semantic value
+   * Filter options based on decision status
+   * For MOVE/SWAP: Show primary CTA + secondary options
+   * For BLOCKED/WARNING: Show all options (up to 3)
    */
   const filterOptions = (options: DecisionOption[]): DecisionOption[] => {
-    if (options.length <= 3) return options;
-
-    const filtered: DecisionOption[] = [];
-    
-    // Priority 1: Find the recommended option (first non-cancel option or one with "recommended" in label)
-    const recommendedOption = options.find(
-      opt => opt.action.type !== 'CANCEL' && 
-             (opt.label.toLowerCase().includes('recommended') || 
-              opt.description.toLowerCase().includes('recommended'))
-    ) || options.find(opt => opt.action.type !== 'CANCEL');
-    
-    if (recommendedOption) {
-      filtered.push(recommendedOption);
-    }
-
-    // Priority 2: Find best alternative (semantically different from recommended)
-    const alternativeOption = options.find(opt => {
-      if (opt.action.type === 'CANCEL') return false;
-      if (filtered.some(f => f.id === opt.id)) return false;
+    // For MOVE and SWAP statuses, prioritize the primary recommendation
+    if (decision.status === 'MOVE' || decision.status === 'SWAP') {
+      const primary = options.find(opt => 
+        opt.action.type !== 'CANCEL' && 
+        (opt.label.toLowerCase().includes('move') || opt.label.toLowerCase().includes('swap'))
+      ) || options.find(opt => opt.action.type !== 'CANCEL');
       
-      // Look for different action types or clear semantic differences
-      if (recommendedOption) {
-        const isDifferentAction = opt.action.type !== recommendedOption.action.type;
-        const isReplace = opt.action.type === 'REPLACE_ACTIVITY';
-        const isMove = opt.action.type === 'MOVE_AND_ADD';
-        const isDifferentSlot = opt.action.payload?.timeSlot !== recommendedOption.action.payload?.timeSlot;
-        
-        return isDifferentAction || isReplace || isMove || isDifferentSlot;
-      }
+      const filtered: DecisionOption[] = [];
+      if (primary) filtered.push(primary);
       
-      return true;
-    });
-    
-    if (alternativeOption) {
-      filtered.push(alternativeOption);
-    }
-
-    // Priority 3: Always include Cancel option if it exists
-    const cancelOption = options.find(opt => opt.action.type === 'CANCEL');
-    if (cancelOption && filtered.length < 3) {
-      filtered.push(cancelOption);
-    }
-    
-    // If we still don't have 3 and there are more options, add the next distinct one
-    if (filtered.length < 3) {
-      const remaining = options.find(opt => 
-        !filtered.some(f => f.id === opt.id) &&
+      // Add secondary options (up to 2 more)
+      const secondary = options.filter(opt => 
+        opt.id !== primary?.id && 
         opt.action.type !== 'CANCEL'
-      );
-      if (remaining) {
-        filtered.push(remaining);
-      }
+      ).slice(0, 2);
+      filtered.push(...secondary);
+      
+      return filtered;
     }
-
-    return filtered.slice(0, 3); // Hard cap at 3
+    
+    // For SMART_REORDER_SUGGESTION, show primary + secondary options
+    if (decision.status === 'SMART_REORDER_SUGGESTION') {
+      const filtered: DecisionOption[] = [];
+      const primary = options.find(opt => opt.id === 'smart_reorder_primary');
+      if (primary) filtered.push(primary);
+      
+      const showAnother = options.find(opt => opt.id === 'show_another_option');
+      if (showAnother) filtered.push(showAnother);
+      
+      const keepAsIs = options.find(opt => opt.id === 'keep_as_is' || opt.id === 'keep_anyway');
+      if (keepAsIs) filtered.push(keepAsIs);
+      
+      return filtered;
+    }
+    
+    // For other statuses, limit to 3 options
+    if (options.length <= 3) return options;
+    
+    const filtered: DecisionOption[] = [];
+    const primary = options.find(opt => opt.action.type !== 'CANCEL');
+    if (primary) filtered.push(primary);
+    
+    const alternative = options.find(opt => 
+      opt.id !== primary?.id && 
+      opt.action.type !== 'CANCEL'
+    );
+    if (alternative) filtered.push(alternative);
+    
+    const cancel = options.find(opt => opt.action.type === 'CANCEL');
+    if (cancel) filtered.push(cancel);
+    
+    return filtered.slice(0, 3);
   };
 
   const filteredOptions = filterOptions(decision.options);
@@ -97,6 +95,14 @@ export function ActivityDecisionModal({
         return <AlertTriangle className="w-5 h-5 text-yellow-600" />;
       case 'BLOCKED':
         return <AlertTriangle className="w-5 h-5 text-red-600" />;
+      case 'MOVE':
+      case 'SWAP':
+        return <Info className="w-5 h-5 text-orange-600" />;
+      case 'ALLOW':
+        return <CheckCircle className="w-5 h-5 text-blue-600" />;
+      case 'REORDER_SUGGESTION':
+      case 'SMART_REORDER_SUGGESTION':
+        return <Info className="w-5 h-5 text-orange-600" />;
       default:
         return <Info className="w-5 h-5 text-blue-600" />;
     }
@@ -110,6 +116,14 @@ export function ActivityDecisionModal({
         return 'bg-yellow-50 border-yellow-200';
       case 'BLOCKED':
         return 'bg-red-50 border-red-200';
+      case 'MOVE':
+      case 'SWAP':
+        return 'bg-orange-50 border-orange-200';
+      case 'ALLOW':
+        return 'bg-blue-50 border-blue-200';
+      case 'REORDER_SUGGESTION':
+      case 'SMART_REORDER_SUGGESTION':
+        return 'bg-orange-50 border-orange-200';
       default:
         return 'bg-blue-50 border-blue-200';
     }
@@ -123,8 +137,32 @@ export function ActivityDecisionModal({
         return 'text-yellow-900';
       case 'BLOCKED':
         return 'text-red-900';
+      case 'MOVE':
+      case 'SWAP':
+        return 'text-orange-900';
+      case 'ALLOW':
+        return 'text-blue-900';
+      case 'REORDER_SUGGESTION':
+      case 'SMART_REORDER_SUGGESTION':
+        return 'text-orange-900';
       default:
         return 'text-blue-900';
+    }
+  };
+
+  const getHeaderTitle = () => {
+    switch (decision.status) {
+      case 'BLOCKED':
+        return 'Cannot Add Activity';
+      case 'MOVE':
+        return 'Consider Moving';
+      case 'SWAP':
+        return 'Consider Swapping';
+      case 'REORDER_SUGGESTION':
+      case 'SMART_REORDER_SUGGESTION':
+        return 'Consider Reordering';
+      default:
+        return 'Review Before Adding';
     }
   };
 
@@ -147,7 +185,7 @@ export function ActivityDecisionModal({
             <div className="flex items-center gap-3">
               {getStatusIcon()}
             <h2 className={`text-lg font-bold ${getHeaderColor()}`}>
-              {decision.status === 'BLOCKED' ? 'Cannot Add Activity' : 'Review Before Adding'}
+              {getHeaderTitle()}
             </h2>
             </div>
             <button
@@ -198,26 +236,26 @@ export function ActivityDecisionModal({
             {/* Options Section */}
             {filteredOptions.length > 0 && (
               <div className="space-y-3">
-                {filteredOptions.map((option) => {
-                  const isRecommended = option.label.toLowerCase().includes('recommended') || option.label.toLowerCase().includes('move to recommended');
-                  const isKeepMyChoice = option.label.toLowerCase().includes('keep my choice') || option.label.toLowerCase().includes('keep my');
+                {filteredOptions.map((option, index) => {
+                  const isPrimary = (decision.status === 'MOVE' || decision.status === 'SWAP') && index === 0;
+                  const isAddAnyway = option.label.toLowerCase().includes('add anyway') || option.label.toLowerCase().includes('keep as is');
+                  const isCancel = option.action.type === 'CANCEL';
                   
-                  // Determine button styling based on option type
+                  // Determine button styling based on option type and status
                   let buttonClasses = "w-full py-4 rounded-xl font-semibold transition-all flex items-center justify-center shadow-md disabled:opacity-50 disabled:cursor-not-allowed ";
-                  if (isRecommended) {
-                    buttonClasses += "bg-orange-400 text-white hover:bg-orange-500 hover:shadow-lg ";
-                  } else if (isKeepMyChoice) {
-                    buttonClasses += "bg-gray-200 text-gray-700 hover:bg-gray-300 hover:shadow-md ";
-                  } else {
-                    buttonClasses += "bg-[#FE4C40] text-white hover:bg-[#E63C30] hover:shadow-lg ";
-                  }
                   
-                  // Determine button text
-                  let buttonText = option.label;
-                  if (isRecommended) {
-                    buttonText = 'Move to recommended time';
-                  } else if (isKeepMyChoice) {
-                    buttonText = 'Keep my choice';
+                  if (isPrimary) {
+                    // Primary CTA for MOVE/SWAP - prominent orange
+                    buttonClasses += "bg-orange-400 text-white hover:bg-orange-500 hover:shadow-lg ";
+                  } else if (isAddAnyway) {
+                    // Add anyway - secondary gray
+                    buttonClasses += "bg-gray-200 text-gray-700 hover:bg-gray-300 hover:shadow-md ";
+                  } else if (isCancel) {
+                    // Cancel - subtle
+                    buttonClasses += "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:shadow-md ";
+                  } else {
+                    // Default - primary red
+                    buttonClasses += "bg-[#FE4C40] text-white hover:bg-[#E63C30] hover:shadow-lg ";
                   }
                   
                   return (
@@ -227,7 +265,7 @@ export function ActivityDecisionModal({
                       disabled={isApplying}
                       className={buttonClasses}
                     >
-                      {buttonText}
+                      {option.label}
                     </button>
                   );
                 })}

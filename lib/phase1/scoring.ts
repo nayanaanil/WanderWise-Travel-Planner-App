@@ -37,6 +37,10 @@ function getFlightDurationMinutes(flight: FlightOption): number {
         // This is a FlightLeg
         totalMinutes += leg.durationMinutes;
       }
+      if ('layoverMinutes' in leg) {
+        // FlightLayover
+        totalMinutes += leg.layoverMinutes;
+      }
     }
     if (totalMinutes > 0) {
       return totalMinutes;

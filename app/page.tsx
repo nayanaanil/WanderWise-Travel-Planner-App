@@ -57,8 +57,8 @@ export default function Home() {
     // HARD RESET - Clear ALL trip state
     resetAllTripState();
     
-    // Navigate to destination page with completely clean state
-    router.push(routes.plan.destination);
+    // Navigate to home screen with completely clean state
+    router.push(routes.home);
   };
 
   const handlePlanTripClick = () => {

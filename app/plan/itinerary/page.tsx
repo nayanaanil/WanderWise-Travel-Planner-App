@@ -7,7 +7,38 @@ import { StepHeader } from '@/components/StepHeader';
 import { routes } from '@/lib/navigation';
 import { getTripState, setSelectedDraftItinerary, DraftItinerary } from '@/lib/tripState';
 import { getItineraryImagePath } from '@/lib/itineraryImages';
-import { MapPin, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { MapPin, ChevronRight, ChevronDown, ChevronUp, Compass } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+/**
+ * Helper function to decode HTML entities and escape sequences in text
+ */
+function decodeHtmlEntities(text: string): string {
+  // First, decode standard HTML entities using the browser's built-in decoder
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  let decoded = textarea.value;
+  
+  // Handle numeric HTML entities that might appear as plain numbers (e.g., 27 for ', 2d for -)
+  // Replace patterns like "word27s" with "word's" and "2d2d" with "--"
+  // IMPORTANT: Replace longer patterns first to avoid breaking them
+  decoded = decoded.replace(/2d2d/g, "--"); // Handle double dashes first
+  decoded = decoded.replace(/(\w+)27(\w)/g, "$1'$2"); // Handle apostrophes like "Australia27s" -> "Australia's"
+  // Handle remaining single 2d patterns (after 2d2d has been replaced)
+  decoded = decoded.replace(/2d/g, "-");
+  
+  // Also handle standard HTML entity patterns if they exist
+  decoded = decoded.replace(/&#27;/g, "'");
+  decoded = decoded.replace(/&#x27;/g, "'");
+  decoded = decoded.replace(/&#39;/g, "'");
+  decoded = decoded.replace(/&apos;/g, "'");
+  decoded = decoded.replace(/&quot;/g, '"');
+  decoded = decoded.replace(/&amp;/g, "&");
+  decoded = decoded.replace(/&lt;/g, "<");
+  decoded = decoded.replace(/&gt;/g, ">");
+  
+  return decoded;
+}
 
 /**
  * Helper function to format travel style IDs into readable interest names
@@ -55,6 +86,16 @@ export default function ItineraryPage() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [userInterests, setUserInterests] = useState<string | null>(null);
+  const [evaluationSummary, setEvaluationSummary] = useState<string | null>(null);
+  const [hasAssumptions, setHasAssumptions] = useState(false);
+  const [showEvaluationSummary, setShowEvaluationSummary] = useState(false);
+  
+  // Auto-show evaluation summary when it's first loaded
+  useEffect(() => {
+    if (evaluationSummary) {
+      setShowEvaluationSummary(true);
+    }
+  }, [evaluationSummary]);
 
   useEffect(() => {
     const tripState = getTripState();
@@ -68,10 +109,22 @@ export default function ItineraryPage() {
 
     setDraftItineraries(tripState.draftItineraries);
     setSelectedItineraryId(tripState.selectedDraftItineraryId || null);
+    setEvaluationSummary(tripState.evaluationSummary || null);
     
     // Format user interests for explanation text
     const interests = formatTravelInterests(tripState.styles);
     setUserInterests(interests);
+    
+    // Check if any assumptions were made (Fast Path)
+    const hasAssumedValues = tripState.assumed && (
+      tripState.assumed.pace ||
+      tripState.assumed.styles ||
+      tripState.assumed.adults ||
+      tripState.assumed.kids ||
+      tripState.assumed.budget ||
+      tripState.assumed.budgetType
+    );
+    setHasAssumptions(!!hasAssumedValues);
     
     // Keep all cards collapsed by default
     setExpandedCards(new Set());
@@ -155,6 +208,15 @@ export default function ItineraryPage() {
             </p>
           </div>
 
+          {/* Fast Path Assumptions Banner */}
+          {hasAssumptions && (
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+              <p className="text-sm text-blue-900">
+                This plan is based on a few assumptions. You can refine it anytime.
+              </p>
+            </div>
+          )}
+
           {/* Itinerary Cards */}
           <div className="space-y-3 mb-6">
             {draftItineraries.map((itinerary, itineraryIndex) => {
@@ -195,9 +257,17 @@ export default function ItineraryPage() {
                       className="w-full h-full object-cover"
                       loading="lazy"
                       onError={(e) => {
-                        console.error('[IMAGE_LOAD_ERROR]', e.currentTarget.src);
+                        const target = e.currentTarget;
+                        // Prevent infinite loops: if we've already tried a fallback, stop here
+                        if (target.dataset.hasTriedFallback === 'true') {
+                          console.error('[IMAGE_LOAD_ERROR] Fallback also failed, stopping retry loop', target.src);
+                          return;
+                        }
+                        console.error('[IMAGE_LOAD_ERROR]', target.src);
+                        // Mark that we're trying a fallback BEFORE changing src
+                        target.dataset.hasTriedFallback = 'true';
                         // Fallback to the shared default itinerary image (Blob-backed).
-                        e.currentTarget.src = getItineraryImagePath({}, 1);
+                        target.src = getItineraryImagePath({}, 1);
                       }}
                     />
                     {/* Subtle gradient overlay for text legibility */}
@@ -205,7 +275,45 @@ export default function ItineraryPage() {
                   </div>
 
                   {/* Card Body */}
-                  <div className={`p-4 transition-colors ${isSelected ? 'bg-[#FFF5F4]/20' : ''}`}>
+                  <div className={`p-4 transition-colors relative ${isSelected ? 'bg-[#FFF5F4]/20' : ''}`}>
+                    {/* Compass Icon - Only for best match itinerary */}
+                    {(itinerary as any).isBestMatch && evaluationSummary && (
+                      <div className="absolute top-4 right-4 z-10">
+                        <motion.button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowEvaluationSummary(!showEvaluationSummary);
+                          }}
+                          className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40 cursor-pointer"
+                          initial={{ x: 0, y: 0, rotate: 0 }}
+                          animate={{
+                            x: [0, -2, 2, -2, 2, -1, 1, 0],
+                            y: [0, -1, 1, -1, 1, 0],
+                            rotate: [0, -3, 3, -3, 3, 0],
+                          }}
+                          transition={{
+                            duration: 2,
+                            times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1],
+                            ease: "easeInOut",
+                            repeat: Infinity,
+                            repeatDelay: 1,
+                          }}
+                        >
+                          <Compass className="w-5 h-5 text-white" />
+                        </motion.button>
+                      </div>
+                    )}
+                    
+                    {/* Evaluation Summary Text Box - Auto-shows and toggles on compass click */}
+                    {(itinerary as any).isBestMatch && evaluationSummary && showEvaluationSummary && (
+                      <div className="absolute top-16 right-4 z-10 max-w-[280px] bg-gray-800 text-white text-sm rounded-lg p-3 shadow-xl">
+                        <p className="break-words whitespace-normal">
+                          {typeof window !== 'undefined' ? decodeHtmlEntities(evaluationSummary) : evaluationSummary}
+                        </p>
+                      </div>
+                    )}
+
                     {/* Header Row - Always visible */}
                     <div className="flex items-start justify-between gap-2 mb-2">
                       {/* Title and Recommended Badge */}
