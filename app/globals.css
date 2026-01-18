@@ -146,6 +146,11 @@ body {
     z-index: 9999;
     box-sizing: border-box;
   }
+  
+  html, body {
+    height: auto;
+    overflow-y: auto;
+  }
 }
 
 
