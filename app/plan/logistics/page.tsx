@@ -2415,7 +2415,7 @@ export default function LogisticsPage() {
           {/* LandingSection - Hero + Summary + Scroll Indicator */}
           <section 
             ref={landingSectionRef}
-            className="relative h-[calc(100dvh-120px-80px)] pt-[80px] overflow-hidden flex flex-col"
+            className="relative h-[calc(100dvh-120px-80px)] pt-[80px] flex flex-col"
           >
             {/* Hero Image */}
             {selectedDraftItinerary && (
