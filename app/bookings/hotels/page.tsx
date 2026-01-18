@@ -135,7 +135,7 @@ function HotelsLoaderPageContent() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center max-w-md mx-auto px-4">
           <div className="mb-6">
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -170,7 +170,7 @@ function HotelsLoaderPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
+    <div className="min-h-[100dvh] bg-white flex items-center justify-center">
       <div className="text-center">
         <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
         <p className="text-gray-600">Finding hotels that fit your itinerary…</p>
@@ -182,7 +182,7 @@ function HotelsLoaderPageContent() {
 export default function HotelsLoaderPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Loading...</p>

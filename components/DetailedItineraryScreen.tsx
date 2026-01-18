@@ -1189,7 +1189,7 @@ export function DetailedItineraryScreen({ bookedItems = [], onAddToTrip, tripPar
 
 
   return (
-    <div className="flex flex-col min-h-screen bg-white">
+    <div className="flex flex-col min-h-[100dvh] bg-white">
       <StepHeader
         title={selectedItinerary?.title || `Itinerary for ${tripParams?.destination || 'Your Destination'}`}
         currentStep={5}

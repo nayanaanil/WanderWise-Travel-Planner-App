@@ -169,14 +169,14 @@ export default function ItineraryPage() {
 
   if (!isHydrated || draftItineraries.length === 0) {
     return (
-      <div className="min-h-screen pb-0">
+      <div className="min-h-[100dvh] pb-0">
         <StepHeader
           title="Choose Your Itinerary"
           currentStep={7}
           totalSteps={10}
           onBack={handleBack}
         />
-        <div className="max-w-md mx-auto px-6 py-6 pt-32 pb-20 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none flex items-center justify-center min-h-[calc(100vh-80px)]">
+        <div className="max-w-md mx-auto px-6 py-6 pt-32 pb-20 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none flex items-center justify-center min-h-[calc(100dvh-80px)]">
           <div className="text-center">
             <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
             <p className="text-gray-600">Loading itineraries...</p>
@@ -189,7 +189,7 @@ export default function ItineraryPage() {
 
   return (
     <>
-      <div className="min-h-screen pb-0">
+      <div className="min-h-[100dvh] pb-0">
         <StepHeader
           title="Choose Your Itinerary"
           currentStep={7}

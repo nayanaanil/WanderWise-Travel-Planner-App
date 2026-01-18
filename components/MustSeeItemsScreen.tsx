@@ -103,7 +103,7 @@ export function MustSeeItemsScreen({ destination, onContinue, onBack }: MustSeeI
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#FFF5F4]/30 via-white to-[#FFF5F4]/20 pb-24">
+    <div className="min-h-[100dvh] bg-gradient-to-br from-[#FFF5F4]/30 via-white to-[#FFF5F4]/20 pb-24">
       <StepHeader
         title="Must-See Attractions"
         currentStep={4}

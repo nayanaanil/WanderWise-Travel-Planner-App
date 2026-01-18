@@ -167,7 +167,7 @@ export function ItineraryCustomizationScreen({
   const costDifference = currentCost - baseCost;
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] pb-24">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] pb-24">
       <StepHeader
         title="Build Your Route"
         currentStep={5}

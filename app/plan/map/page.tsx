@@ -177,7 +177,7 @@ export default function MapViewPage() {
 
   if (!isHydrated || !structuralRoute) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Loading map...</p>
@@ -195,7 +195,7 @@ export default function MapViewPage() {
         onBack={handleBack}
       />
 
-      <div className="min-h-screen pb-0 flex flex-col">
+      <div className="min-h-[100dvh] pb-0 flex flex-col">
         <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-32 pb-20 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
             {/* Helper Text */}
             <div className="mb-4">
@@ -230,7 +230,7 @@ export default function MapViewPage() {
             )}
 
             {/* Map */}
-            <div className="h-[calc(100vh-240px)] min-h-[500px] mb-6">
+            <div className="h-[calc(100dvh-240px)] min-h-[500px] mb-6">
               <RouteMap
                 cities={getMapCities()}
                 activeCity={activeCity}

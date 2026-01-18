@@ -40,7 +40,7 @@ export function TripCostAndBookingScreen({ onBack, onComplete }: TripCostAndBook
 
   if (showSuccess) {
     return (
-      <div className="min-h-screen bg-[#F9FAFB] flex flex-col items-center justify-center max-w-md mx-auto px-4">
+      <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col items-center justify-center max-w-md mx-auto px-4">
         <div className="w-full bg-white rounded-2xl p-8 text-center shadow-lg">
           <div className="w-20 h-20 bg-[#10B981] rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
             <Check className="w-12 h-12 text-white" />
@@ -94,7 +94,7 @@ export function TripCostAndBookingScreen({ onBack, onComplete }: TripCostAndBook
   }
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] flex flex-col max-w-md mx-auto">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col max-w-md mx-auto">
       <StepHeader
         title="Confirm & Book"
         currentStep={9}

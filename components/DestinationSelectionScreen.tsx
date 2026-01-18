@@ -393,7 +393,7 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
 
 
   return (
-    <div className="min-h-screen pb-0 flex flex-col">
+    <div className="min-h-[100dvh] pb-0 flex flex-col">
       <StepHeader
         title="Where to?"
         currentStep={1}

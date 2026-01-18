@@ -1094,7 +1094,7 @@ function ActivitySelectPageContent() {
     return (
       <>
         <StepHeader title="Select Activity" currentStep={9} totalSteps={10} onBack={handleBack} />
-        <div className="flex items-center justify-center min-h-screen">
+        <div className="flex items-center justify-center min-h-[100dvh]">
           <div className="text-center">
             <div className="text-gray-500 mb-2">Loading activities...</div>
           </div>
@@ -1106,7 +1106,7 @@ function ActivitySelectPageContent() {
   return (
     <>
       <StepHeader title={`Activities in ${city}`} currentStep={9} totalSteps={10} onBack={handleBack} />
-      <div className="max-w-md mx-auto pb-32 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 min-h-screen">
+      <div className="max-w-md mx-auto pb-32 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 min-h-[100dvh]">
         <div className="px-4 py-6 pt-[120px]">
           <div className="mb-4 relative">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">Choose an activity</h2>
@@ -1334,7 +1334,7 @@ export default function ActivitySelectPage() {
     <Suspense fallback={
       <>
         <StepHeader title="Select Activity" currentStep={9} totalSteps={10} onBack={() => {}} />
-        <div className="flex items-center justify-center min-h-screen">
+        <div className="flex items-center justify-center min-h-[100dvh]">
           <div className="text-center">
             <div className="text-gray-500 mb-2">Loading...</div>
           </div>

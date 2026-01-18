@@ -41,7 +41,7 @@ export function FlightConfirmationScreen({
   const canConfirmBooking = transportApproval1 && transportApproval2;
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] flex flex-col pb-20">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col pb-20">
       <StepHeader title="Confirmation" currentStep={8} totalSteps={10} onBack={onBackToOptions} />
       
       <div className="flex-1 overflow-y-auto px-4 py-6">

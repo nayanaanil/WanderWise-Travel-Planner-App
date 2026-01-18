@@ -808,7 +808,7 @@ function HotelOptionsPageContent() {
     return (
       <>
         <div className="fixed inset-0 bg-gray-900 -z-10" />
-        <div className="min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 flex items-center justify-center">
+        <div className="min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 flex items-center justify-center">
           <div className="text-center">
             <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
             <p className="text-gray-600">Loading hotel options...</p>
@@ -828,7 +828,7 @@ function HotelOptionsPageContent() {
       <>
         <div className="fixed inset-0 bg-gray-900 -z-10" />
         <Header />
-        <main className="flex flex-col min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
+        <main className="flex flex-col min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
           <StepHeader
             title="Hotel Selection"
             currentStep={7}
@@ -869,7 +869,7 @@ function HotelOptionsPageContent() {
     <>
       <div className="fixed inset-0 bg-gray-900 -z-10" />
       <Header />
-      <main className="flex flex-col min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
+      <main className="flex flex-col min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
         <StepHeader
           title="Choose Hotels"
           currentStep={8}
@@ -1347,7 +1347,7 @@ function HotelOptionsPageContent() {
 export default function HotelOptionsPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Loading...</p>

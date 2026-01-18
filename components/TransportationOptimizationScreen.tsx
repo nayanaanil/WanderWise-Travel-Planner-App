@@ -682,7 +682,7 @@ export function TransportationOptimizationScreen({
   };
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] pb-24">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] pb-24">
       {/* Smart Overlay */}
       {showSmartOverlay && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -850,7 +850,7 @@ export function TransportationOptimizationScreen({
           className="fixed left-0 right-0 bg-white shadow-lg z-30 max-w-md mx-auto animate-in slide-in-from-top duration-300"
           style={{ 
             top: '280px',
-            height: 'calc(100vh - 280px - 80px)',
+            height: 'calc(100dvh - 280px - 80px)',
             overflowY: 'auto',
           }}
         >
@@ -1101,7 +1101,7 @@ export function TransportationOptimizationScreen({
           className="fixed left-0 right-0 bg-white shadow-lg z-30 max-w-md mx-auto animate-in slide-in-from-top duration-300"
           style={{ 
             top: '280px',
-            height: 'calc(100vh - 280px - 80px)',
+            height: 'calc(100dvh - 280px - 80px)',
             overflowY: 'auto',
           }}
         >

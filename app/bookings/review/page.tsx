@@ -152,7 +152,7 @@ export default function ReviewPage() {
 
   if (!isHydrated || !selectedItinerary) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Loading review...</p>
@@ -164,7 +164,7 @@ export default function ReviewPage() {
   return (
     <>
       <Header />
-      <main className="flex flex-col min-h-screen bg-white">
+      <main className="flex flex-col min-h-[100dvh] bg-white">
         <StepHeader
           title="Review Your Trip"
           currentStep={9}

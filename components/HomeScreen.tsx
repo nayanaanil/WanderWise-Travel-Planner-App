@@ -54,39 +54,19 @@ export function HomeScreen({ onPlanTrip }: HomeScreenProps) {
   };
 
   return (
-    <div className="min-h-screen pb-0 flex flex-col relative overflow-hidden">
+    <div className="min-h-[100dvh] pb-0 flex flex-col relative overflow-hidden">
       {/* Gradient Background Container - constrained to max-w-md like destination page */}
-      <div className="flex-1 max-w-md mx-auto w-full min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-rose-100 relative">
+      <div className="flex-1 max-w-md mx-auto w-full min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-rose-100 relative">
         {/* 3D Globe Background */}
         <div className="absolute inset-0 w-full h-full pointer-events-none">
           <InteractiveGlobeWrapper />
             </div>
 
         {/* Centered Content Overlay */}
-        <div className="flex-1 w-full px-6 py-6 flex items-center justify-center relative z-10 min-h-screen">
+        <div className="flex-1 w-full px-6 py-6 flex items-center justify-center relative z-10 min-h-[100dvh]">
           <div className="w-full text-center space-y-8">
-            {/* Compass Icon with Arrow */}
+            {/* Compass Icon */}
             <div className="relative">
-              {/* Animated Arrow pointing to compass */}
-              {!showIntroModal && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ 
-                    opacity: [0.5, 1, 0.5],
-                    scale: [0.9, 1, 0.9],
-                    x: [0, 5, 0],
-                  }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  }}
-                  className="absolute -left-12 top-1/2 -translate-y-1/2 z-20"
-                >
-                  <ArrowRight className="w-8 h-8 text-orange-500 drop-shadow-lg" />
-                </motion.div>
-              )}
-
               {/* "Click me!" tooltip */}
               {showClickMe && !showIntroModal && (
                 <motion.div
@@ -148,7 +128,7 @@ export function HomeScreen({ onPlanTrip }: HomeScreenProps) {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.6 }}
-              className="text-6xl md:text-7xl font-bold text-orange-600"
+              className="text-6xl md:text-7xl font-bold text-orange-600 text-center"
             >
               WanderWise
             </motion.h1>

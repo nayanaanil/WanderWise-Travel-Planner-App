@@ -119,7 +119,7 @@ export default function BookingsPage() {
   if (!isHydrated || !selectedItinerary) {
     return (
       <>
-        <div className="min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 flex items-center justify-center pb-28">
+        <div className="min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 flex items-center justify-center pb-28">
           <div className="text-center">
             <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
             <p className="text-gray-600">Loading bookings...</p>
@@ -380,7 +380,7 @@ export default function BookingsPage() {
 
   return (
     <>
-      <main className="flex flex-col min-h-screen pb-20">
+      <main className="flex flex-col min-h-[100dvh] pb-20">
         <StepHeader
           title="Review Your Bookings"
           currentStep={10}

@@ -1301,7 +1301,7 @@ export default function LogisticsPage() {
 
   if (!isHydrated || !structuralRoute) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Loading logistics overview...</p>
@@ -2415,7 +2415,7 @@ export default function LogisticsPage() {
           {/* LandingSection - Hero + Summary + Scroll Indicator */}
           <section 
             ref={landingSectionRef}
-            className="relative h-[calc(100vh-120px-80px)] overflow-hidden flex flex-col"
+            className="relative h-[calc(100dvh-120px-80px)] overflow-hidden flex flex-col"
           >
             {/* Hero Image */}
             {selectedDraftItinerary && (

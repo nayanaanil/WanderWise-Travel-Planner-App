@@ -306,7 +306,7 @@ export default function HotelImpactPage() {
 
   if (!isHydrated || !hotelImpactResult || !baselineRoute) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Loading impact analysis...</p>
@@ -329,7 +329,7 @@ export default function HotelImpactPage() {
   return (
     <>
       <Header />
-      <main className="flex flex-col min-h-screen bg-white">
+      <main className="flex flex-col min-h-[100dvh] bg-white">
         <StepHeader
           title="Hotel Impact Review"
           currentStep={8}

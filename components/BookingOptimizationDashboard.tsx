@@ -22,7 +22,7 @@ export function BookingOptimizationDashboard({
   onBookCurrent
 }: BookingOptimizationDashboardProps) {
   return (
-    <div className="min-h-screen bg-[#F9FAFB] pb-32">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] pb-32">
       <Header />
       
       <div className="pt-16 px-6 max-w-md mx-auto">

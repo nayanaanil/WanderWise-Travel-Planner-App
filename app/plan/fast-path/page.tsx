@@ -106,7 +106,7 @@ export default function FastPathPage() {
   return (
     <>
       <div className="fixed inset-0 bg-gray-900 -z-10" />
-      <main className="min-h-screen bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
+      <main className="min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50">
         <StepHeader
           title="When are you traveling?"
           currentStep={2}

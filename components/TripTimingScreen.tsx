@@ -279,7 +279,7 @@ export function TripTimingScreen({ onContinue, onBack }: TripTimingScreenProps) 
   };
 
   return (
-    <div className="min-h-screen pb-0 flex flex-col">
+    <div className="min-h-[100dvh] pb-0 flex flex-col">
       <StepHeader
         title="Plan your trip timing"
         currentStep={2}

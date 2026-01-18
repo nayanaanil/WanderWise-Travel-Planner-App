@@ -222,7 +222,7 @@ export function DurationParametersScreen({ destination, onContinue, onBack }: Du
     : 0;
 
   return (
-    <div className="min-h-screen pb-0 flex flex-col">
+    <div className="min-h-[100dvh] pb-0 flex flex-col">
       <StepHeader
         title="Trip Duration & Details"
         currentStep={3}

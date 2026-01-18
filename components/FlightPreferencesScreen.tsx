@@ -81,7 +81,7 @@ export function FlightPreferencesScreen({
   );
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] pb-32">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] pb-32">
       <StepHeader title="Flight Preferences" currentStep={7} totalSteps={10} onBack={onBack} />
       
       <div className="pt-16 px-6 max-w-md mx-auto">

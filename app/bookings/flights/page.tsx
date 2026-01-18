@@ -172,7 +172,7 @@ export default function FlightsLoaderPage() {
   // Show loading state
   if (isLoading && !error) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-[100dvh] flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-[#FE4C40] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600 text-lg">Finding flight options...</p>
@@ -185,7 +185,7 @@ export default function FlightsLoaderPage() {
   // Show error state with retry
   if (error) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center px-4">
+      <div className="min-h-[100dvh] bg-white flex items-center justify-center px-4">
         <div className="text-center max-w-md">
           <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg

@@ -509,7 +509,7 @@ export function ItineraryPlannerScreen({ bookedItems = [], onAddToTrip, tripPara
   };
 
   return (
-    <div className="min-h-screen bg-white pb-20">
+    <div className="min-h-[100dvh] bg-white pb-20">
       <StepHeader
         title={`${calculateDays()} ${calculateDays() === 1 ? 'Day' : 'Days'} in ${tripParams?.destination || 'Your Destination'}`}
         currentStep={5}
@@ -587,7 +587,7 @@ export function ItineraryPlannerScreen({ bookedItems = [], onAddToTrip, tripPara
 
         {/* Tab Content - Itinerary */}
         {activeTab === 'itinerary' && (
-          <div className="px-4 py-4 pt-[200px] overflow-y-auto max-h-[calc(100vh-200px)] max-w-md mx-auto">
+          <div className="px-4 py-4 pt-[200px] overflow-y-auto max-h-[calc(100dvh-200px)] max-w-md mx-auto">
             {/* Booked Items Section */}
             {bookedItems.length > 0 && (
               <div className="mb-6">
@@ -1264,7 +1264,7 @@ export function ItineraryPlannerScreen({ bookedItems = [], onAddToTrip, tripPara
 
         {/* Map Tab Content */}
         {activeTab === 'map' && (
-          <div className="px-4 py-6 pt-[200px] h-[calc(100vh-200px)]">
+          <div className="px-4 py-6 pt-[200px] h-[calc(100dvh-200px)]">
             <div className="w-full h-full bg-gradient-to-br from-blue-100 via-green-50 to-gray-100 rounded-2xl overflow-hidden relative shadow-lg">
               {/* Simulated Map */}
               <div className="absolute inset-0">
@@ -1345,7 +1345,7 @@ export function ItineraryPlannerScreen({ bookedItems = [], onAddToTrip, tripPara
 
         {/* Calendar Tab Content */}
         {activeTab === 'calendar' && (
-          <div className="px-4 py-6 pt-[200px] max-h-[calc(100vh-200px)] overflow-y-auto">
+          <div className="px-4 py-6 pt-[200px] max-h-[calc(100dvh-200px)] overflow-y-auto">
             <div className="max-w-4xl mx-auto">
               <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
                 <div className="mb-6">
