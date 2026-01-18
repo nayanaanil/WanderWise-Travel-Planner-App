@@ -54,7 +54,7 @@ export function HomeScreen({ onPlanTrip }: HomeScreenProps) {
   };
 
   return (
-    <div className="min-h-[100dvh] pb-0 flex flex-col relative overflow-y-auto">
+    <div className="min-h-[100dvh] pb-24 flex flex-col relative overflow-y-auto">
       {/* Gradient Background Container - constrained to max-w-md like destination page */}
       <div className="flex-1 max-w-md mx-auto w-full min-h-[100dvh] bg-gradient-to-br from-orange-50 via-pink-50 to-rose-100 relative">
         {/* 3D Globe Background */}

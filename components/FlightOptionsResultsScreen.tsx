@@ -1617,7 +1617,7 @@ export function FlightOptionsResultsScreen({
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col overflow-y-auto">
+    <div className="min-h-[100dvh] flex flex-col overflow-y-auto pb-24">
       <StepHeader
         title="Review flight options"
         currentStep={7}

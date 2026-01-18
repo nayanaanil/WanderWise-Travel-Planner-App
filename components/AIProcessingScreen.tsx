@@ -64,7 +64,7 @@ export function AIProcessingScreen({
   // Show error state
   if (error) {
     return (
-      <div className="min-h-[100dvh] pb-0 flex flex-col overflow-y-auto">
+      <div className="min-h-[100dvh] pb-24 flex flex-col overflow-y-auto">
         <StepHeader
           title="Creating Your Itinerary"
           currentStep={6}
@@ -103,7 +103,7 @@ export function AIProcessingScreen({
   }
 
   return (
-    <div className="min-h-[100dvh] pb-0 flex flex-col overflow-y-auto">
+    <div className="min-h-[100dvh] pb-24 flex flex-col overflow-y-auto">
       <StepHeader
         title="Creating Your Itinerary"
         currentStep={5}

@@ -291,7 +291,7 @@ export function AccommodationSelectionScreenV2({ onBack, onContinue }: Accommoda
   );
 
   return (
-    <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col max-w-md mx-auto overflow-y-auto">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col max-w-md mx-auto overflow-y-auto pb-24">
       <StepHeader
         title="Where to Stay"
         currentStep={7}

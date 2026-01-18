@@ -23,7 +23,7 @@ export function TripSummaryOverviewScreen({
   const [policiesExpanded, setPoliciesExpanded] = useState(false);
 
   return (
-    <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col max-w-md mx-auto overflow-y-auto">
+    <div className="min-h-[100dvh] bg-[#F9FAFB] flex flex-col max-w-md mx-auto overflow-y-auto pb-24">
       <StepHeader
         title="Review Your Trip"
         currentStep={8}
