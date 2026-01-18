@@ -1617,7 +1617,7 @@ export function FlightOptionsResultsScreen({
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col overflow-y-auto pb-24">
+    <div className="min-h-[100dvh] flex flex-col overflow-y-auto">
       <StepHeader
         title="Review flight options"
         currentStep={7}
@@ -1625,7 +1625,7 @@ export function FlightOptionsResultsScreen({
         onBack={handleBackClick}
       />
       
-      <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-[120px] pb-20 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
+      <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-[120px] pb-24 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
         {/* Page Title */}
         <div className="text-center mb-8 relative">
           <h1 className="text-lg md:text-xl font-medium text-gray-900 mb-2">

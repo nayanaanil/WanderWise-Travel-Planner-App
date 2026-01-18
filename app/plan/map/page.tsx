@@ -195,8 +195,8 @@ export default function MapViewPage() {
         onBack={handleBack}
       />
 
-      <div className="min-h-[100dvh] pb-24 flex flex-col overflow-y-auto">
-        <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-32 pb-20 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
+      <div className="min-h-[100dvh] flex flex-col overflow-y-auto">
+        <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-32 pb-24 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
             {/* Helper Text */}
             <div className="mb-4">
               <p className="text-sm text-[#6B7280] leading-relaxed">

@@ -82,14 +82,14 @@ const toggleStyle = (styleId: string) => {
   const isFormValid = selectedPace && selectedStyles.length > 0;
 
   return (
-    <div className="min-h-[100dvh] pb-24 flex flex-col overflow-y-auto">
+    <div className="min-h-[100dvh] flex flex-col overflow-y-auto">
       <StepHeader
         title="Travel Pace & Style"
         currentStep={4}
         totalSteps={10}
         onBack={onBack}
       />
-      <div className="flex-1 max-w-md mx-auto w-full px-6 py-4 pt-[110px] pb-[15px] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
+      <div className="flex-1 max-w-md mx-auto w-full px-6 py-4 pt-[110px] pb-24 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none">
         {/* Page Title */}
         <div className="text-center mb-14">
           <h1 className="text-lg md:text-xl font-medium text-gray-900">

@@ -409,7 +409,7 @@ export function LocationsSelectionScreen({ destination, onContinue, onBack }: Lo
   }, [selectedCities, planningMode, isHydrated, mapLocations]);
 
   return (
-    <div className="min-h-[100dvh] pb-24 flex flex-col overflow-y-auto">
+    <div className="min-h-[100dvh] flex flex-col overflow-y-auto">
       <StepHeader
         title="Choose Places to Include"
         currentStep={5}

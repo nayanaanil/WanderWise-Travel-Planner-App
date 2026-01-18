@@ -23,6 +23,7 @@ export interface AutocompleteInputProps {
   icon?: 'mapPin' | 'search';
   className?: string;
   inputType?: 'origin' | 'destination'; // 'origin' uses /api/cities/origin, 'destination' uses /api/cities
+  allowFreeText?: boolean; // If false, only allow selection from autocomplete suggestions
 }
 
 export function AutocompleteInput({
@@ -36,6 +37,7 @@ export function AutocompleteInput({
   icon = 'mapPin',
   className = "",
   inputType = 'destination',
+  allowFreeText = true,
 }: AutocompleteInputProps) {
   const [suggestions, setSuggestions] = useState<City[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -123,6 +125,9 @@ export function AutocompleteInput({
 
   // Handle free text (when user types and presses Enter or Continue)
   const handleFreeText = () => {
+    if (!allowFreeText) {
+      return; // Disallow free text if allowFreeText is false
+    }
     if (value.trim() && !selectedCity) {
       if (onFreeText) {
         onFreeText(value.trim());
@@ -135,10 +140,14 @@ export function AutocompleteInput({
     if (!showSuggestions || suggestions.length === 0) {
       if (e.key === 'Enter') {
         e.preventDefault();
-        handleFreeText();
-        if (onEnter && value.trim()) {
-          onEnter();
+        // Only allow free text if allowFreeText is true
+        if (allowFreeText) {
+          handleFreeText();
+          if (onEnter && value.trim()) {
+            onEnter();
+          }
         }
+        // If allowFreeText is false and no city is selected, do nothing
       }
       return;
     }
@@ -159,9 +168,12 @@ export function AutocompleteInput({
         if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
           handleSelectCity(suggestions[selectedIndex]);
         } else {
-          handleFreeText();
-          if (onEnter && value.trim()) {
-            onEnter();
+          // Only allow free text if allowFreeText is true
+          if (allowFreeText) {
+            handleFreeText();
+            if (onEnter && value.trim()) {
+              onEnter();
+            }
           }
         }
         break;
@@ -276,9 +288,15 @@ export function AutocompleteInput({
       )}
 
       {/* Free text indicator */}
-      {value.trim() && !selectedCity && suggestions.length === 0 && !isSearching && (
+      {allowFreeText && value.trim() && !selectedCity && suggestions.length === 0 && !isSearching && (
         <div className="absolute top-full mt-1 left-0 text-xs text-gray-500 px-2">
           Press Enter to use as free text
+        </div>
+      )}
+      {/* No free text allowed indicator */}
+      {!allowFreeText && value.trim() && !selectedCity && suggestions.length === 0 && !isSearching && (
+        <div className="absolute top-full mt-1 left-0 text-xs text-amber-600 px-2">
+          Please select from suggestions
         </div>
       )}
     </div>

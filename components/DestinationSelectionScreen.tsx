@@ -308,23 +308,28 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
       setValidationError('');
     }
     // Save to sessionStorage immediately
-    if (isHydrated) {
+    // Only save if a city is selected (no free text allowed for source)
+    if (isHydrated && selectedFromCity) {
       saveTripState({
-        fromLocation: value.trim() ? {
-          type: selectedFromCity ? 'city' : 'searchPhrase',
-          value: value.trim(),
-          city: selectedFromCity || undefined,
-        } : undefined,
+        fromLocation: {
+          type: 'city' as const,
+          value: selectedFromCity.name,
+          city: selectedFromCity,
+        },
+      });
+    } else if (isHydrated && !value.trim()) {
+      // Clear fromLocation if input is cleared
+      saveTripState({
+        fromLocation: undefined,
       });
     }
   };
 
   const validateAndContinue = (destinationData: DestinationData) => {
-    // Validate that both source and destination are filled (only check non-empty)
-    const hasSource = fromLocation.trim() || selectedFromCity;
-    
-    if (!hasSource) {
-      setValidationError('Please enter your starting location');
+    // Validate that both source and destination are filled
+    // Source must be selected from autocomplete (no free text allowed)
+    if (!selectedFromCity) {
+      setValidationError('Please select your starting location from the suggestions');
       return false; // Stop navigation
     }
 
@@ -339,10 +344,9 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
     };
 
     // Save final state to sessionStorage
+    // Source must always be a city (selectedFromCity is required by validation)
     const finalState: any = {
-      fromLocation: selectedFromCity 
-        ? { type: 'city' as const, value: selectedFromCity.name, city: selectedFromCity }
-        : { type: 'searchPhrase' as const, value: fromLocation.trim() },
+      fromLocation: { type: 'city' as const, value: selectedFromCity.name, city: selectedFromCity },
       destination: finalDestinationData,
     };
     
@@ -356,15 +360,14 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
     // Clear any previous validation errors
     setValidationError('');
 
-    // Validate that both source and destination are filled (only check non-empty)
-    const hasSource = fromLocation.trim() || selectedFromCity;
-    const hasDestination = searchQuery.trim() || selectedDestinationCity;
-
-    if (!hasSource) {
-      setValidationError('Please enter your starting location');
+    // Validate that both source and destination are filled
+    // Source must be selected from autocomplete (no free text allowed)
+    if (!selectedFromCity) {
+      setValidationError('Please select your starting location from the suggestions');
       return; // Stop navigation
     }
 
+    const hasDestination = searchQuery.trim() || selectedDestinationCity;
     if (!hasDestination) {
       setValidationError('Please enter a destination');
       return; // Stop navigation
@@ -393,14 +396,14 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
 
 
   return (
-    <div className="min-h-[100dvh] pb-24 flex flex-col overflow-y-auto">
+    <div className="min-h-[100dvh] flex flex-col overflow-y-auto">
       <StepHeader
         title="Where to?"
         currentStep={1}
         totalSteps={10}
         onBack={onBack}
       />
-      <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-[120px] pb-[15px] bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none relative">
+      <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-[120px] pb-24 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none relative">
         {/* Compass Icon - Floating in top-right */}
         <div className="absolute top-20 right-6 z-10">
           <Tooltip>
@@ -452,9 +455,10 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
               placeholder="Your starting location..."
             icon="mapPin"
             inputType="origin"
-            className={validationError && !fromLocation.trim() && !selectedFromCity ? 'error' : ''}
+            allowFreeText={false}
+            className={validationError && !selectedFromCity ? 'error' : ''}
           />
-          {validationError && !fromLocation.trim() && !selectedFromCity && (
+          {validationError && !selectedFromCity && (
             <p className="text-red-500 text-sm mt-1 ml-1">{validationError}</p>
           )}
         </div>
