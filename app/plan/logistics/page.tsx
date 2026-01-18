@@ -2478,7 +2478,7 @@ export default function LogisticsPage() {
           const stayCities = groupedCityStays().map(s => s.city);
           
           return (
-            <div className="relative -mt-[8vh] mx-4 bg-white rounded-2xl shadow-xl px-6 py-6 z-10 flex-1">
+            <div className="relative mt-12 mx-4 bg-white rounded-2xl shadow-xl px-6 py-6 z-10">
               {/* Destination Title */}
               <div className="text-2xl font-bold text-foreground mb-3">
                 {destinationName}
