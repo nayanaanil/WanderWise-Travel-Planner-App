@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, MapPin, ChevronRight, Compass } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Search, MapPin, ChevronRight } from 'lucide-react';
 import { ImageWithFallback } from '@/components/ImageWithFallback';
 import { StepHeader } from '@/components/StepHeader';
 import { AutocompleteInput, City } from '@/components/AutocompleteInput';
 import { getTripState, saveTripState, clearAIDerivedFields } from '@/lib/tripState';
 import { HorizontalCarousel } from '@/components/HorizontalCarousel';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/ui/tooltip';
 
 export interface DestinationData {
   type: 'city' | 'searchPhrase';
@@ -126,8 +124,6 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
   const [isHydrated, setIsHydrated] = useState(true); // Set to true since we initialize synchronously
   const [validationError, setValidationError] = useState<string>('');
   const [selectedDestinationCard, setSelectedDestinationCard] = useState<string | null>(null);
-  const [hasHovered, setHasHovered] = useState(false);
-  const [jiggleKey, setJiggleKey] = useState(1); // Start at 1 to trigger initial animation
 
   // Ensure state is synced with sessionStorage on mount (for edge cases)
   useEffect(() => {
@@ -148,18 +144,6 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
       }
     }
   }, []);
-
-  // Set up repeating jiggle animation every 10 seconds if user hasn't hovered
-  useEffect(() => {
-    if (hasHovered) return; // Stop repeating if user has hovered
-
-    // Set up interval to jiggle every 10 seconds (first jiggle happens immediately via initial key=1)
-    const interval = setInterval(() => {
-      setJiggleKey(prev => prev + 1);
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [hasHovered]);
 
   const popularDestinations = [
     { name: 'Bali, Indonesia', image: 'https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=800', tag: 'Beach & Culture' },
@@ -404,41 +388,6 @@ export function DestinationSelectionScreen({ onDestinationSelected, onBack }: De
         onBack={onBack}
       />
       <div className="flex-1 max-w-md mx-auto w-full px-6 py-6 pt-[120px] pb-24 bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 rounded-t-2xl rounded-b-none relative">
-        {/* Compass Icon - Floating in top-right */}
-        <div className="absolute top-20 right-6 z-10">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <motion.div
-                key={jiggleKey}
-                onMouseEnter={() => setHasHovered(true)}
-                className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-lg shadow-orange-300/40 cursor-pointer"
-                initial={{ x: 0, y: 0, rotate: 0 }}
-                animate={{
-                  x: [0, -2, 2, -2, 2, -1, 1, 0],
-                  y: [0, -1, 1, -1, 1, 0],
-                  rotate: [0, -3, 3, -3, 3, 0],
-                }}
-                transition={{
-                  duration: 2,
-                  times: [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1],
-                  ease: "easeInOut",
-                }}
-              >
-                <Compass className="w-6 h-6 text-white" />
-              </motion.div>
-            </TooltipTrigger>
-            <TooltipContent
-              side="left"
-              sideOffset={8}
-              className="max-w-[200px] bg-gray-800 text-white text-sm"
-            >
-              <p className="break-words whitespace-normal">
-                Look for me in the app to give you suggestions to make your trip the best one for you.
-              </p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-
         {/* Header - Premium */}
         <div className="text-center mb-14">
           <h1 className="text-lg md:text-xl font-medium text-gray-900">

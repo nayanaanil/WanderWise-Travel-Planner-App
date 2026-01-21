@@ -89,13 +89,6 @@ export default function ItineraryPage() {
   const [evaluationSummary, setEvaluationSummary] = useState<string | null>(null);
   const [hasAssumptions, setHasAssumptions] = useState(false);
   const [showEvaluationSummary, setShowEvaluationSummary] = useState(false);
-  
-  // Auto-show evaluation summary when it's first loaded
-  useEffect(() => {
-    if (evaluationSummary) {
-      setShowEvaluationSummary(true);
-    }
-  }, [evaluationSummary]);
 
   useEffect(() => {
     const tripState = getTripState();

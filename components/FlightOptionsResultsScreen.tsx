@@ -362,10 +362,17 @@ function formatFlightTimeDisplay(
 /**
  * Resolves the best gateway + flights based on user-selected priority.
  * Uses existing ranked data only - no new scoring formulas.
+ * 
+ * @param excludeCombinations Optional array of flight combinations to exclude (for ensuring distinct recommendations)
  */
 function resolveSelectionByPriority(
   priority: 'price' | 'arrival' | 'layover',
-  gatewayOptions: GatewayOption[]
+  gatewayOptions: GatewayOption[],
+  excludeCombinations: Array<{
+    gatewayId: string;
+    outboundFlightId: string;
+    inboundFlightId: string;
+  }> = []
 ): {
   gatewayId: string;
   outboundFlightId: string;
@@ -375,6 +382,20 @@ function resolveSelectionByPriority(
   if (gatewayOptions.length === 0) {
     return null;
   }
+
+  // Helper function to check if a combination is excluded
+  const isExcluded = (
+    gatewayId: string,
+    outboundFlightId: string,
+    inboundFlightId: string
+  ): boolean => {
+    return excludeCombinations.some(
+      (excluded) =>
+        excluded.gatewayId === gatewayId &&
+        excluded.outboundFlightId === outboundFlightId &&
+        excluded.inboundFlightId === inboundFlightId
+    );
+  };
 
   if (priority === 'price') {
     // Choose gateway with lowest total price (cheapest outbound + cheapest inbound)
@@ -411,10 +432,52 @@ function resolveSelectionByPriority(
       );
 
       if (cheapestOutbound && cheapestInbound) {
+        // Check if this combination is excluded
+        if (!isExcluded(bestGateway.id, cheapestOutbound.id, cheapestInbound.id)) {
+          return {
+            gatewayId: bestGateway.id,
+            outboundFlightId: cheapestOutbound.id,
+            inboundFlightId: cheapestInbound.id,
+            priorityUsed: 'price',
+          };
+        }
+      }
+    }
+    
+    // If best combination was excluded, try next best
+    // Sort all gateways by total price and find first non-excluded
+    const gatewaysWithPrices = gatewayOptions
+      .map((gateway) => {
+        const cheapestOutbound = gateway.outbound.flights.reduce(
+          (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+          null as Phase1FlightOption | null
+        );
+        const cheapestInbound = gateway.inbound.flights.reduce(
+          (min, f) => (!min || (f.price || 0) < min.price ? f : min),
+          null as Phase1FlightOption | null
+        );
         return {
-          gatewayId: bestGateway.id,
-          outboundFlightId: cheapestOutbound.id,
-          inboundFlightId: cheapestInbound.id,
+          gateway,
+          cheapestOutbound,
+          cheapestInbound,
+          totalPrice: cheapestOutbound && cheapestInbound 
+            ? (cheapestOutbound.price || 0) + (cheapestInbound.price || 0)
+            : Number.MAX_SAFE_INTEGER,
+        };
+      })
+      .filter((item) => item.cheapestOutbound && item.cheapestInbound)
+      .sort((a, b) => a.totalPrice - b.totalPrice);
+    
+    for (const item of gatewaysWithPrices) {
+      if (
+        item.cheapestOutbound &&
+        item.cheapestInbound &&
+        !isExcluded(item.gateway.id, item.cheapestOutbound.id, item.cheapestInbound.id)
+      ) {
+        return {
+          gatewayId: item.gateway.id,
+          outboundFlightId: item.cheapestOutbound.id,
+          inboundFlightId: item.cheapestInbound.id,
           priorityUsed: 'price',
         };
       }
@@ -495,12 +558,75 @@ function resolveSelectionByPriority(
         bestGateway.outbound.flights[0];
 
       if (earliestInbound && bestOutbound) {
+        // Check if this combination is excluded
+        if (!isExcluded(bestGateway.id, bestOutbound.id, earliestInbound.id)) {
+          return {
+            gatewayId: bestGateway.id,
+            outboundFlightId: bestOutbound.id,
+            inboundFlightId: earliestInbound.id,
+            priorityUsed: 'arrival',
+          };
+        }
+      }
+    }
+    
+    // If best combination was excluded, try next best gateway
+    const gatewaysWithArrivals = gatewayOptions
+      .map((gateway) => {
+        const earliestInbound = gateway.inbound.flights.reduce(
+          (earliest, f) => {
+            if (!earliest) return f;
+            const earliestTime = earliest.arrivalTime;
+            const fTime = f.arrivalTime;
+            if (!earliestTime || !fTime) return earliest;
+
+            const [earliestHourStr] = earliestTime.split(':');
+            const [fHourStr] = fTime.split(':');
+            const earliestHour = parseInt(earliestHourStr, 10);
+            const fHour = parseInt(fHourStr, 10);
+
+            if (isNaN(earliestHour) || isNaN(fHour)) return earliest;
+
+            const earliestHourAdjusted = earliestHour < 5 ? earliestHour + 24 : earliestHour;
+            const fHourAdjusted = fHour < 5 ? fHour + 24 : fHour;
+
+            return fHourAdjusted < earliestHourAdjusted ? f : earliest;
+          },
+          null as Phase1FlightOption | null
+        );
         return {
-          gatewayId: bestGateway.id,
-          outboundFlightId: bestOutbound.id,
-          inboundFlightId: earliestInbound.id,
-          priorityUsed: 'arrival',
+          gateway,
+          earliestInbound,
+          arrivalHour: earliestInbound?.arrivalTime
+            ? (() => {
+                const [hourStr] = earliestInbound.arrivalTime!.split(':');
+                const hour = parseInt(hourStr, 10);
+                return isNaN(hour) ? 24 : hour < 5 ? hour + 24 : hour;
+              })()
+            : 24,
         };
+      })
+      .filter((item) => item.earliestInbound)
+      .sort((a, b) => a.arrivalHour - b.arrivalHour);
+    
+    for (const item of gatewaysWithArrivals) {
+      if (item.earliestInbound) {
+        const bestOutbound =
+          item.gateway.outbound.flights.find((f) => f.recommended) ||
+          item.gateway.outbound.flights.find((f) => f.fastest) ||
+          item.gateway.outbound.flights[0];
+        
+        if (
+          bestOutbound &&
+          !isExcluded(item.gateway.id, bestOutbound.id, item.earliestInbound.id)
+        ) {
+          return {
+            gatewayId: item.gateway.id,
+            outboundFlightId: bestOutbound.id,
+            inboundFlightId: item.earliestInbound.id,
+            priorityUsed: 'arrival',
+          };
+        }
       }
     }
   } else if (priority === 'layover') {
@@ -590,10 +716,100 @@ function resolveSelectionByPriority(
       );
 
       if (bestOutbound && bestInbound) {
+        // Check if this combination is excluded
+        if (!isExcluded(bestGateway.id, bestOutbound.id, bestInbound.id)) {
+          return {
+            gatewayId: bestGateway.id,
+            outboundFlightId: bestOutbound.id,
+            inboundFlightId: bestInbound.id,
+            priorityUsed: 'layover',
+          };
+        }
+      }
+    }
+    
+    // If best combination was excluded, try next best gateway
+    const gatewaysWithScores = gatewayOptions
+      .map((gateway) => {
+        let gatewayLayoverScore = 0;
+        for (const flight of gateway.outbound.flights) {
+          const stops = flight.stops ?? 0;
+          gatewayLayoverScore += stops * 100;
+          if (flight.legs && flight.legs.length > 0) {
+            for (const leg of flight.legs as any[]) {
+              if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+                const layoverMins = leg.layoverMinutes;
+                gatewayLayoverScore += layoverMins;
+                if (layoverMins >= 8 * 60) {
+                  gatewayLayoverScore += 500;
+                }
+              }
+            }
+          }
+        }
+        for (const flight of gateway.inbound.flights) {
+          const stops = flight.stops ?? 0;
+          gatewayLayoverScore += stops * 100;
+          if (flight.legs && flight.legs.length > 0) {
+            for (const leg of flight.legs as any[]) {
+              if ('layoverMinutes' in leg && typeof leg.layoverMinutes === 'number') {
+                const layoverMins = leg.layoverMinutes;
+                gatewayLayoverScore += layoverMins;
+                if (layoverMins >= 8 * 60) {
+                  gatewayLayoverScore += 500;
+                }
+              }
+            }
+          }
+        }
+        const avgScore = gatewayLayoverScore / (gateway.outbound.flights.length + gateway.inbound.flights.length);
+        
+        const bestOutbound = gateway.outbound.flights.reduce(
+          (best, f) => {
+            if (!best) return f;
+            const bestStops = best.stops ?? 0;
+            const fStops = f.stops ?? 0;
+            if (fStops < bestStops) return f;
+            if (fStops > bestStops) return best;
+            if (f.recommended && !best.recommended) return f;
+            return best;
+          },
+          null as Phase1FlightOption | null
+        );
+        
+        const bestInbound = gateway.inbound.flights.reduce(
+          (best, f) => {
+            if (!best) return f;
+            const bestStops = best.stops ?? 0;
+            const fStops = f.stops ?? 0;
+            if (fStops < bestStops) return f;
+            if (fStops > bestStops) return best;
+            if (f.recommended && !best.recommended) return f;
+            return best;
+          },
+          null as Phase1FlightOption | null
+        );
+        
         return {
-          gatewayId: bestGateway.id,
-          outboundFlightId: bestOutbound.id,
-          inboundFlightId: bestInbound.id,
+          gateway,
+          avgScore,
+          bestOutbound,
+          bestInbound,
+        };
+      })
+      .filter((item) => item.bestOutbound && item.bestInbound)
+      .sort((a, b) => a.avgScore - b.avgScore);
+    
+    for (const item of gatewaysWithScores) {
+      if (
+        item.bestOutbound &&
+        item.bestInbound &&
+        !isExcluded(item.gateway.id, item.bestOutbound.id, item.bestInbound.id)
+      ) {
+        return {
+          gatewayId: item.gateway.id,
+          outboundFlightId: item.bestOutbound.id,
+          inboundFlightId: item.bestInbound.id,
           priorityUsed: 'layover',
         };
       }
@@ -1131,6 +1347,13 @@ export function FlightOptionsResultsScreen({
   const [flightPriorityGuidance, setFlightPriorityGuidance] = useState<FlightPriorityGuidance | null>(null);
   const [selectedFlightPriority, setSelectedFlightPriority] = useState<'price' | 'arrival' | 'layover' | null>(null);
   const [showPriorityGuidance, setShowPriorityGuidance] = useState(false);
+  // Store pre-resolved flights for all priorities to ensure distinct recommendations
+  const [resolvedFlightsByPriority, setResolvedFlightsByPriority] = useState<Map<string, {
+    gatewayId: string;
+    outboundFlightId: string;
+    inboundFlightId: string;
+    priorityUsed: 'price' | 'arrival' | 'layover';
+  }>>(new Map());
   
   // Auto-show guidance when it's first loaded
   useEffect(() => {
@@ -1364,7 +1587,65 @@ export function FlightOptionsResultsScreen({
         .then((data) => {
           // Accept guidance with brief and valid priorities array (can be empty)
           if (data && data.brief && typeof data.brief === 'string' && Array.isArray(data.priorities)) {
-            setFlightPriorityGuidance(data);
+            // Use tripState.gatewayOptions directly (already set in state above)
+            const currentGatewayOptions = tripState.gatewayOptions || [];
+            
+            // Pre-resolve all priorities to ensure distinct recommendations
+            const resolvedMap = new Map<string, {
+              gatewayId: string;
+              outboundFlightId: string;
+              inboundFlightId: string;
+              priorityUsed: 'price' | 'arrival' | 'layover';
+            }>();
+            const excludeCombinations: Array<{
+              gatewayId: string;
+              outboundFlightId: string;
+              inboundFlightId: string;
+            }> = [];
+
+            // Only pre-resolve if we have gateway options
+            if (currentGatewayOptions.length > 0) {
+              // Resolve each priority, excluding previously resolved combinations
+              for (const priority of data.priorities) {
+                const priorityId = priority.id as 'price' | 'arrival' | 'layover';
+                const resolved = resolveSelectionByPriority(
+                  priorityId,
+                  currentGatewayOptions,
+                  excludeCombinations
+                );
+
+                if (resolved) {
+                  resolvedMap.set(priorityId, resolved);
+                  excludeCombinations.push({
+                    gatewayId: resolved.gatewayId,
+                    outboundFlightId: resolved.outboundFlightId,
+                    inboundFlightId: resolved.inboundFlightId,
+                  });
+                }
+              }
+            }
+
+            // Validation: Check for duplicates and count distinct combinations
+            const resolvedCombinations = Array.from(resolvedMap.values()).map((r) => 
+              `${r.gatewayId}-${r.outboundFlightId}-${r.inboundFlightId}`
+            );
+            const distinctCombinations = new Set(resolvedCombinations);
+            const hasDuplicates = resolvedCombinations.length !== distinctCombinations.size;
+            const distinctCount = distinctCombinations.size;
+
+            // Store pre-resolved selections
+            setResolvedFlightsByPriority(resolvedMap);
+
+            // Collapse to brief-only if fewer than 2 distinct combinations or duplicates detected
+            if (hasDuplicates || distinctCount < 2) {
+              setFlightPriorityGuidance({
+                brief: data.brief,
+                priorities: [], // Hide pills if duplicates
+              });
+            } else {
+              // All distinct, show full guidance
+              setFlightPriorityGuidance(data);
+            }
           }
         })
         .catch((err) => {
@@ -1390,14 +1671,21 @@ export function FlightOptionsResultsScreen({
       return;
     }
 
-    const resolved = resolveSelectionByPriority(selectedFlightPriority, gatewayOptions);
-    setAgentResolvedSelection(resolved);
-
-    // Auto-expand the resolved gateway so user can see the flights
-    if (resolved) {
-      setExpandedGatewayId(resolved.gatewayId);
+    // Use pre-resolved selection if available, otherwise resolve on demand
+    const preResolved = resolvedFlightsByPriority.get(selectedFlightPriority);
+    if (preResolved) {
+      setAgentResolvedSelection(preResolved);
+      // Auto-expand the resolved gateway so user can see the flights
+      setExpandedGatewayId(preResolved.gatewayId);
+    } else {
+      // Fallback: resolve on demand (shouldn't happen if pre-resolution worked)
+      const resolved = resolveSelectionByPriority(selectedFlightPriority, gatewayOptions);
+      setAgentResolvedSelection(resolved);
+      if (resolved) {
+        setExpandedGatewayId(resolved.gatewayId);
+      }
     }
-  }, [selectedFlightPriority, gatewayOptions]);
+  }, [selectedFlightPriority, gatewayOptions, resolvedFlightsByPriority]);
 
   const handleGatewaySelect = (gatewayId: string) => {
     if (selectedGatewayId === gatewayId) {

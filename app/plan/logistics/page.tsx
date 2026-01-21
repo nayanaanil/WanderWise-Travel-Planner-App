@@ -45,6 +45,22 @@ const TAG_COPY_MAP: Record<string, string> = {
 };
 
 /**
+ * Format INR amount: round to nearest lakh if >= 1L, otherwise show full amount
+ */
+function formatINR(amount: number): string {
+  const LAKH = 100000; // 1 lakh = 100,000
+  
+  if (amount >= LAKH) {
+    // Round to nearest lakh and format as "X.XXL"
+    const lakhs = Math.round(amount / LAKH * 100) / 100; // Round to 2 decimal places
+    return `${lakhs.toFixed(2).replace(/\.?0+$/, '')}L`; // Remove trailing zeros
+  } else {
+    // Show full amount, no decimals
+    return Math.round(amount).toLocaleString('en-IN');
+  }
+}
+
+/**
  * Generate a deterministic summary sentence explaining the itinerary
  */
 function generateTripSummarySentence({
@@ -1941,7 +1957,7 @@ export default function LogisticsPage() {
             )}
             {hotel.pricePerNight && (
               <div className="text-xs text-gray-700 font-medium">
-                ${hotel.pricePerNight.toLocaleString()}/night
+                ₹{formatINR(hotel.pricePerNight * 83)}/night
               </div>
             )}
             <div className="text-xs text-blue-600 mt-2 font-medium">
@@ -2616,6 +2632,10 @@ export default function LogisticsPage() {
                 const totalCost = flightCost + hotelCost;
                 const hasBookings = flightsBooked || hotelsBooked;
 
+                // Convert USD to INR (1 USD = 83 INR, approximate rate)
+                const USD_TO_INR_RATE = 83;
+                const totalCostINR = totalCost * USD_TO_INR_RATE;
+
                 // Generate booking status message (under 5 words)
                 let bookingStatusMessage = '';
                 if (!flightsBooked && !hotelsBooked) {
@@ -2633,7 +2653,7 @@ export default function LogisticsPage() {
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-semibold text-foreground">Total cost so far</span>
                       <span className="text-lg font-bold text-primary">
-                        ${totalCost > 0 ? totalCost.toLocaleString() : '0'}
+                        ₹{totalCostINR > 0 ? formatINR(totalCostINR) : '0'}
                       </span>
                     </div>
                     {hasBookings && (

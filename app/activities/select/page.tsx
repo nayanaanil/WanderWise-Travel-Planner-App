@@ -397,8 +397,14 @@ function ActivitySelectPageContent() {
     }> = [];
     
     if (structuralRoute?.derived?.arrivalDates && structuralRoute?.derived?.departureDates) {
-      const cityArrivalDate = structuralRoute.derived.arrivalDates[city];
-      const cityDepartureDate = structuralRoute.derived.departureDates[city];
+      // Fix Issue 3: Normalize city name for matching (case-insensitive, trimmed)
+      const normalizedCity = city.toLowerCase().trim();
+      
+      // Try to find city with normalized name, fallback to original city name
+      const cityArrivalDate = structuralRoute.derived.arrivalDates[normalizedCity] || 
+                               structuralRoute.derived.arrivalDates[city];
+      const cityDepartureDate = structuralRoute.derived.departureDates[normalizedCity] || 
+                                 structuralRoute.derived.departureDates[city];
       
       if (cityArrivalDate && cityDepartureDate) {
         // Get dayActivities from sessionStorage
@@ -420,6 +426,16 @@ function ActivitySelectPageContent() {
         
         for (let d = new Date(arrival); d <= departure; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().split('T')[0];
+          
+          // Fix Issue 3: Validate date is within city's date range (safety check)
+          const dateTime = d.getTime();
+          const arrivalTime = arrival.getTime();
+          const departureTime = departure.getTime();
+          
+          // Skip if date is outside city's range (shouldn't happen, but safety check)
+          if (dateTime < arrivalTime || dateTime > departureTime) {
+            continue;
+          }
           
           // Skip the current day (we're evaluating for this day)
           if (dateStr === day) {
@@ -510,8 +526,14 @@ function ActivitySelectPageContent() {
     let allCityActivityDetails: Array<{ id: string; name: string; physicalEffort?: 'low' | 'medium' | 'high'; durationSlots?: 1 | 2; bestTime?: TimeSlot | TimeSlot[]; timingSensitivity?: 'low' | 'medium' | 'high' }> = [];
     
     if (structuralRoute?.derived?.arrivalDates && structuralRoute?.derived?.departureDates) {
-      const cityArrivalDate = structuralRoute.derived.arrivalDates[city];
-      const cityDepartureDate = structuralRoute.derived.departureDates[city];
+      // Fix Issue 3: Normalize city name for matching (case-insensitive, trimmed)
+      const normalizedCity = city.toLowerCase().trim();
+      
+      // Try to find city with normalized name, fallback to original city name
+      const cityArrivalDate = structuralRoute.derived.arrivalDates[normalizedCity] || 
+                               structuralRoute.derived.arrivalDates[city];
+      const cityDepartureDate = structuralRoute.derived.departureDates[normalizedCity] || 
+                                 structuralRoute.derived.departureDates[city];
       
       if (cityArrivalDate && cityDepartureDate) {
         // Get dayActivities from sessionStorage
@@ -535,6 +557,17 @@ function ActivitySelectPageContent() {
         
         for (let d = new Date(arrival); d <= departure; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().split('T')[0];
+          
+          // Fix Issue 3: Validate date is within city's date range (safety check)
+          const dateTime = d.getTime();
+          const arrivalTime = arrival.getTime();
+          const departureTime = departure.getTime();
+          
+          // Skip if date is outside city's range (shouldn't happen, but safety check)
+          if (dateTime < arrivalTime || dateTime > departureTime) {
+            continue;
+          }
+          
           const dayData = dayActivities[dateStr] || {};
           
           allCityActivities.push({
@@ -685,11 +718,14 @@ function ActivitySelectPageContent() {
     // Standard single-activity actions
     let finalSlot = slotTime;
     let finalActivityId = selectedActivity.id;
+    let finalDate = day; // Default to original day
     let removeActivityId: string | undefined = undefined;
 
     if (actionType === 'SCHEDULE_ACTIVITY' && payload?.timeSlot) {
       finalSlot = payload.timeSlot;
       finalActivityId = payload.activityId || selectedActivity.id;
+      // Fix Issue 1: Extract date from payload if provided (for move-to-different-day suggestions)
+      finalDate = payload.date || day;
     } else if (actionType === 'REPLACE_ACTIVITY' && payload?.addActivityId) {
       finalActivityId = payload.addActivityId;
       finalSlot = payload.timeSlot || slotTime;
@@ -697,15 +733,19 @@ function ActivitySelectPageContent() {
     } else if (actionType === 'MOVE_TO_SLOT' && payload?.timeSlot) {
       finalSlot = payload.timeSlot;
       finalActivityId = payload.activityId || selectedActivity.id;
+      // Extract date if provided
+      finalDate = payload.date || day;
     } else if (actionType === 'PROCEED_ANYWAY' && payload?.activityId && payload?.timeSlot) {
       finalActivityId = payload.activityId;
       finalSlot = payload.timeSlot;
+      // Extract date if provided
+      finalDate = payload.date || day;
     }
 
     // Build URL params
     const params = new URLSearchParams({
       scheduledActivity: finalActivityId,
-      scheduledDate: day,
+      scheduledDate: finalDate, // Use extracted date instead of original day
       scheduledSlot: finalSlot,
       scheduledName: selectedActivity.name,
       slot: finalSlot, // finalSlot is already 'day' or 'night' from decision engine

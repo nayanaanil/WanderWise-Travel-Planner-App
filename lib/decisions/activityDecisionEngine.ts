@@ -163,9 +163,8 @@ function findNearestDayWithSlot(
     const dateA = new Date(a.date).getTime();
     const dateB = new Date(b.date).getTime();
     const currentTime = current.getTime();
-    // Prefer future days, then nearest past days
-    if (dateA >= currentTime && dateB < currentTime) return -1;
-    if (dateA < currentTime && dateB >= currentTime) return 1;
+    // Fix Issue 3: Prefer closer dates (past or future) - absolute distance
+    // This ensures same-city past days are preferred over future days in different cities
     return Math.abs(dateA - currentTime) - Math.abs(dateB - currentTime);
   });
   
@@ -190,8 +189,7 @@ function findLighterDay(
     const dateA = new Date(a.date).getTime();
     const dateB = new Date(b.date).getTime();
     const currentTime = current.getTime();
-    if (dateA >= currentTime && dateB < currentTime) return -1;
-    if (dateA < currentTime && dateB >= currentTime) return 1;
+    // Fix Issue 3: Prefer closer dates (past or future) - absolute distance
     return Math.abs(dateA - currentTime) - Math.abs(dateB - currentTime);
   });
   
@@ -224,8 +222,7 @@ function findDayWithSlotAndEnergy(
     const dateA = new Date(a.date).getTime();
     const dateB = new Date(b.date).getTime();
     const currentTime = current.getTime();
-    if (dateA >= currentTime && dateB < currentTime) return -1;
-    if (dateA < currentTime && dateB >= currentTime) return 1;
+    // Fix Issue 3: Prefer closer dates (past or future) - absolute distance
     return Math.abs(dateA - currentTime) - Math.abs(dateB - currentTime);
   });
   
@@ -276,6 +273,45 @@ export function evaluateActivityDecision(input: ActivityDecisionInput): Decision
   // DECISION MATRIX IMPLEMENTATION
   // ============================================
 
+  // DAY 1 EVENING ACTIVITY CONSTRAINT
+  // On arrival day (day 1), if user tries to add evening activity when day activity already exists,
+  // suggest leaving evening free due to travel fatigue and existing travel cards (flight + city transfer)
+  // This check runs early to prioritize day 1 constraints over other conflicts
+  if (isArrivalDay && requestedSlot === 'night' && existingActivities.some(a => a.timeSlot === 'day')) {
+    return {
+      domain: 'activity',
+      status: 'WARNING',
+      facts: [
+        'Your arrival day already has quite a bit planned: a day activity plus travel time from your flight and city transfer.',
+        'Adding an evening activity might make the day feel too packed after traveling.',
+      ],
+      risks: ['Evening may feel rushed after a long travel day'],
+      recommendation: 'Consider leaving the evening free to rest and adjust',
+      options: [
+        {
+          id: 'leave-evening-free',
+          label: 'Leave evening free',
+          description: 'Keep the evening open to rest after your travel day',
+          action: { type: 'CANCEL' },
+        },
+        {
+          id: 'add-anyway-evening',
+          label: 'Add anyway',
+          description: 'Schedule this activity despite the packed schedule',
+          tradeoffs: ['Evening may feel rushed after travel'],
+          action: {
+            type: 'SCHEDULE_ACTIVITY',
+            payload: {
+              activityId: activity.id,
+              date: day.date,
+              timeSlot: requestedSlot,
+            },
+          },
+        },
+      ],
+    };
+  }
+
   // A. SLOT MISMATCH HANDLING
   if (hasSlotMismatch && correctSlot) {
     // A1: Correct slot available on same day
@@ -285,19 +321,35 @@ export function evaluateActivityDecision(input: ActivityDecisionInput): Decision
         status: 'MOVE',
         facts: [`This activity fits better during the ${correctSlot === 'day' ? 'day' : 'evening'}.`],
         recommendation: `Move activity to ${correctSlot} slot`,
-        options: [{
-          id: 'move-to-correct-slot',
-          label: 'Move activity to another slot on same day',
-          description: `This activity fits better during the ${correctSlot === 'day' ? 'day' : 'evening'}.`,
-          action: {
-            type: 'SCHEDULE_ACTIVITY',
-            payload: {
-              activityId: activity.id,
-              date: day.date,
-              timeSlot: correctSlot,
+        options: [
+          {
+            id: 'move-to-correct-slot',
+            label: 'Move activity to another slot on same day',
+            description: `This activity fits better during the ${correctSlot === 'day' ? 'day' : 'evening'}.`,
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: day.date,
+                timeSlot: correctSlot,
+              },
             },
           },
-        }],
+          {
+            id: 'add-anyway-slot',
+            label: 'Add anyway',
+            description: 'Schedule this activity despite slot mismatch',
+            tradeoffs: ['Activity may not be at optimal time'],
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: day.date,
+                timeSlot: requestedSlot,
+              },
+            },
+          },
+        ],
       };
     }
 
@@ -312,19 +364,35 @@ export function evaluateActivityDecision(input: ActivityDecisionInput): Decision
           'Your current day is full.',
         ],
         recommendation: `Move to ${formatDate(nearestDayWithSlot.date)}`,
-        options: [{
-          id: 'move-to-other-day',
-          label: `Move to ${formatDate(nearestDayWithSlot.date)}`,
-          description: `This activity fits best during the ${correctSlot === 'day' ? 'day' : 'evening'}. Your current day is full.`,
-          action: {
-            type: 'SCHEDULE_ACTIVITY',
-            payload: {
-              activityId: activity.id,
-              date: nearestDayWithSlot.date,
-              timeSlot: nearestDayWithSlot.slot,
+        options: [
+          {
+            id: 'move-to-other-day',
+            label: `Move to ${formatDate(nearestDayWithSlot.date)}`,
+            description: `This activity fits best during the ${correctSlot === 'day' ? 'day' : 'evening'}. Your current day is full.`,
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: nearestDayWithSlot.date,
+                timeSlot: nearestDayWithSlot.slot,
+              },
             },
           },
-        }],
+          {
+            id: 'add-anyway-slot',
+            label: 'Add anyway',
+            description: 'Schedule this activity despite slot mismatch',
+            tradeoffs: ['Activity may not be at optimal time'],
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: day.date,
+                timeSlot: requestedSlot,
+              },
+            },
+          },
+        ],
       };
     }
 
@@ -401,19 +469,35 @@ export function evaluateActivityDecision(input: ActivityDecisionInput): Decision
         status: 'MOVE',
         facts: [reason],
         recommendation: `Move to ${formatDate(lighterDay.date)}`,
-        options: [{
-          id: 'move-to-lighter-day',
-          label: `Move to ${formatDate(lighterDay.date)}`,
-          description: reason,
-          action: {
-            type: 'SCHEDULE_ACTIVITY',
-            payload: {
-              activityId: activity.id,
-              date: lighterDay.date,
-              timeSlot: lighterDay.slot,
+        options: [
+          {
+            id: 'move-to-lighter-day',
+            label: `Move to ${formatDate(lighterDay.date)}`,
+            description: reason,
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: lighterDay.date,
+                timeSlot: lighterDay.slot,
+              },
             },
           },
-        }],
+          {
+            id: 'add-anyway-energy',
+            label: 'Add anyway',
+            description: 'Schedule this activity despite energy conflict',
+            tradeoffs: ['This may feel rushed or tiring'],
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: day.date,
+                timeSlot: requestedSlot || freeSlots[0] || 'day',
+              },
+            },
+          },
+        ],
       };
     }
 
@@ -491,19 +575,35 @@ export function evaluateActivityDecision(input: ActivityDecisionInput): Decision
           'This activity fits best during the day on a lighter schedule.',
         ],
         recommendation: `Move to ${formatDate(perfectDay.date)}`,
-        options: [{
-          id: 'move-to-perfect-day',
-          label: `Move to ${formatDate(perfectDay.date)}`,
-          description: 'This activity fits best during the day on a lighter schedule.',
-          action: {
-            type: 'SCHEDULE_ACTIVITY',
-            payload: {
-              activityId: activity.id,
-              date: perfectDay.date,
-              timeSlot: perfectDay.slot,
+        options: [
+          {
+            id: 'move-to-perfect-day',
+            label: `Move to ${formatDate(perfectDay.date)}`,
+            description: 'This activity fits best during the day on a lighter schedule.',
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: perfectDay.date,
+                timeSlot: perfectDay.slot,
+              },
             },
           },
-        }],
+          {
+            id: 'add-anyway-combined',
+            label: 'Add anyway',
+            description: 'Schedule this activity despite slot and energy conflicts',
+            tradeoffs: ['Activity may not be at optimal time', 'This may feel rushed or tiring'],
+            action: {
+              type: 'SCHEDULE_ACTIVITY',
+              payload: {
+                activityId: activity.id,
+                date: day.date,
+                timeSlot: requestedSlot,
+              },
+            },
+          },
+        ],
       };
     }
 

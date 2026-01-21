@@ -39,6 +39,7 @@ export function Footer({ activeTab, onHomeClick, onInspireClick, onTripsClick, o
   const isMapPage = pathname === '/plan/map';
   const isFlightOptionsPage = pathname === '/bookings/flights/options';
   const isBookingsPage = pathname === '/bookings';
+  const isProfilePage = pathname === '/profile';
   
   const handleHomeClick = () => {
     if (onHomeClick) {
@@ -73,7 +74,7 @@ export function Footer({ activeTab, onHomeClick, onInspireClick, onTripsClick, o
   };
   
   return (
-    <footer className={`fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-50 ${(isDestinationPage || isTimingPage || isDurationPage || isPacePage || isLocationsPage || isProcessingPage || isItineraryPage || isLogisticsPage || isMapPage || isFlightOptionsPage || isBookingsPage) ? 'bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 border-t border-orange-100/50' : 'bg-white border-t border-gray-100'} shadow-lg`}>
+    <footer className={`fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-50 ${(isDestinationPage || isTimingPage || isDurationPage || isPacePage || isLocationsPage || isProcessingPage || isItineraryPage || isLogisticsPage || isMapPage || isFlightOptionsPage || isBookingsPage || isProfilePage) ? 'bg-gradient-to-br from-orange-50 via-pink-50 to-orange-50 border-t border-orange-100/50' : 'bg-white border-t border-gray-100'} shadow-lg`}>
       <div className="flex items-center justify-around py-2">
         <button
           onClick={handleHomeClick}
@@ -104,6 +105,7 @@ export function Footer({ activeTab, onHomeClick, onInspireClick, onTripsClick, o
         </button>
         
         <button
+          onClick={handleProfileClick}
           className={`flex flex-col items-center gap-1 px-4 py-2 rounded-lg transition-colors ${
             currentTab === 'profile' ? 'text-[#FE4C40]' : 'text-gray-600 hover:text-gray-900'
           }`}
