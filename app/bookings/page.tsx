@@ -56,11 +56,10 @@ export default function BookingsPage() {
       ? (outboundFlight && inboundFlight)
       : true; // No flights needed if no origin
     
-    // Check hotels (required for all cities)
-    const hasAllHotels = requiredHotelCities.every(city => selectedHotels[city]);
+    // Hotels are optional - no constraint on hotels
 
-    return hasFlights && hasAllHotels;
-  }, [outboundFlight, inboundFlight, selectedHotels, requiredHotelCities, tripState.fromLocation]);
+    return hasFlights;
+  }, [outboundFlight, inboundFlight, tripState.fromLocation]);
 
   // Calculate total price from confirmed reservations only
   const totalPrice = useMemo(() => {

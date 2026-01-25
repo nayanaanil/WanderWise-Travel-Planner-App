@@ -651,10 +651,32 @@ function ActivitySelectPageContent() {
 
   const handleOptionSelect = (option: DecisionResult['options'][0]) => {
     if (!selectedActivity) return;
-    setIsApplying(true);
-
+    
     const actionType = option.action.type;
     const payload = option.action.payload;
+
+    // Handle CANCEL action
+    if (actionType === 'CANCEL') {
+      // Special case: "Leave evening free" option - store a marker instead of leaving empty
+      if (option.id === 'leave-evening-free') {
+        // Navigate to logistics page with a special parameter to mark this slot as "left free"
+        const params = new URLSearchParams({
+          leaveSlotFree: 'true',
+          freeSlotDate: day,
+          freeSlotName: slotName,
+        });
+        router.push(`/plan/logistics?${params.toString()}`);
+      }
+      
+      setShowDecisionModal(false);
+      setActiveDecision(null);
+      setActiveExplanation(null);
+      setSelectedActivity(null);
+      setIsApplying(false);
+      return;
+    }
+
+    setIsApplying(true);
 
     // PART 4: Apply only the chosen option - no auto-resolution
     // MOVE_AND_ADD requires moving one activity and adding another

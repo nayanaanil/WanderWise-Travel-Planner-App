@@ -615,38 +615,36 @@ export function LocationsSelectionScreen({ destination, onContinue, onBack }: Lo
                         key={city.id}
                         onClick={() => !isDisabled && toggleCity(city.id)}
                         disabled={isDisabled}
-                        className={`w-full rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all text-left bg-white ${
+                        className={`relative w-full rounded-2xl p-4 shadow-md hover:shadow-lg transition-all text-center ${
                           isSelected
-                            ? 'ring-2 ring-[#FE4C40]'
+                            ? 'ring-2 ring-[#FE4C40] bg-[#FE4C40]/10'
                             : isDisabled
-                            ? 'opacity-50 cursor-not-allowed'
-                            : 'hover:ring-1 hover:ring-[#FE4C40]/30'
+                            ? 'opacity-50 cursor-not-allowed bg-white'
+                            : 'bg-white hover:ring-1 hover:ring-[#FE4C40]/30'
                         }`}
                       >
-                        <div className="flex gap-3">
-                          {/* Thumbnail on the left */}
-                          <div className="w-24 h-24 bg-gray-200 relative flex items-center justify-center flex-shrink-0">
-                            <span className="text-gray-400 text-lg">📍</span>
-                            {isSelected && (
-                              <div className="absolute inset-0 bg-[#FE4C40]/80 flex items-center justify-center">
-                                <div className="w-6 h-6 rounded-full bg-white text-[#FE4C40] flex items-center justify-center font-bold text-sm">
-                                  ✓
-                                </div>
-                              </div>
-                            )}
-                            {!isSelected && !isDisabled && (
-                              <div className="absolute top-1 right-1 text-gray-400 hover:text-gray-600 transition-colors">
-                                <Plus className="w-4 h-4" />
-                              </div>
-                            )}
+                        {isSelected && (
+                          <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#FE4C40] text-white flex items-center justify-center">
+                            <span className="text-xs font-bold">✓</span>
                           </div>
-                          {/* Text content on the right */}
-                          <div className="flex-1 py-3 pr-3 flex flex-col justify-center min-w-0">
-                            <h4 className="text-sm font-medium text-gray-900 mb-1">
+                        )}
+                        {!isSelected && !isDisabled && (
+                          <div className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 transition-colors">
+                            <Plus className="w-4 h-4" />
+                          </div>
+                        )}
+                        <div className="flex flex-col items-center gap-2">
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl ${
+                            isSelected ? 'bg-[#FE4C40] text-white' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            📍
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-900">
                               {city.name}
                             </h4>
                             {city.reason && (
-                              <p className="text-xs text-gray-600 leading-relaxed">{city.reason}</p>
+                              <p className="text-xs text-gray-600 mt-1">{city.reason}</p>
                             )}
                           </div>
                         </div>
@@ -731,40 +729,38 @@ export function LocationsSelectionScreen({ destination, onContinue, onBack }: Lo
                             key={city.id}
                             onClick={() => !isDisabled && toggleCity(city.id)}
                             disabled={isDisabled}
-                            className={`relative rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all text-left ${
+                            className={`relative rounded-2xl p-4 shadow-md hover:shadow-lg transition-all text-center ${
                               isSelected
-                                ? 'ring-2 ring-[#FE4C40]'
+                                ? 'ring-2 ring-[#FE4C40] bg-[#FE4C40]/10'
                                 : isDisabled
-                                ? 'opacity-50 cursor-not-allowed'
-                                : 'hover:ring-1 hover:ring-[#FE4C40]/30'
+                                ? 'opacity-50 cursor-not-allowed bg-white'
+                                : 'bg-white hover:ring-1 hover:ring-[#FE4C40]/30'
                             }`}
                           >
-                            <div className="aspect-video bg-gray-200 relative">
-                              <ImageWithFallback
-                                src={`/city-images/${city.countryCode.toLowerCase()}/${city.name.toLowerCase().replace(/\s+/g, '-')}.jpg`}
-                                alt={city.name}
-                                className="w-full h-full object-cover"
-                              />
-                              {isSelected && (
-                                <div className="absolute inset-0 bg-[#FE4C40]/80 flex items-center justify-center">
-                                  <div className="w-8 h-8 rounded-full bg-white text-[#FE4C40] flex items-center justify-center font-bold">
-                                    ✓
-                                  </div>
-                                </div>
-                              )}
-                              {!isSelected && !isDisabled && (
-                                <div className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 transition-colors">
-                                  <Plus className="w-4 h-4" />
-                                </div>
-                              )}
-                            </div>
-                            <div className="p-2 bg-white">
-                              <h4 className="text-sm font-medium text-gray-900 truncate">
-                                {city.name}{city.country && `, ${city.country}`}
-                              </h4>
-                              {city.reason && (
-                                <p className="text-xs text-gray-600 mt-1 line-clamp-1">{city.reason}</p>
-                              )}
+                            {isSelected && (
+                              <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-[#FE4C40] text-white flex items-center justify-center">
+                                <span className="text-xs font-bold">✓</span>
+                              </div>
+                            )}
+                            {!isSelected && !isDisabled && (
+                              <div className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 transition-colors">
+                                <Plus className="w-4 h-4" />
+                              </div>
+                            )}
+                            <div className="flex flex-col items-center gap-2">
+                              <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl ${
+                                isSelected ? 'bg-[#FE4C40] text-white' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                📍
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-medium text-gray-900">
+                                  {city.name}
+                                </h4>
+                                {city.reason && (
+                                  <p className="text-xs text-gray-600 mt-1 line-clamp-1">{city.reason}</p>
+                                )}
+                              </div>
                             </div>
                           </button>
                         );

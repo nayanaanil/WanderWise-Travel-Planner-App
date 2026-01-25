@@ -8,7 +8,7 @@
  * - Stub provider allowed (MVP)
  */
 
-import { HotelSearchRequest, HotelSearchResponse } from './types';
+import { HotelSearchRequest, HotelSearchResponse, HotelTags } from './types';
 
 /**
  * High-demand cities that affect availability
@@ -145,51 +145,79 @@ function computeAvailability(
 }
 
 /**
- * Mock hotel data for MVP with deterministic availability
+ * Mock hotel data for MVP with deterministic availability and preference tags
  */
 function mockHotelsForCity(city: string, visit: { arrival: string; departure: string; nights: number }) {
-  const baseHotels = [
+  // Hotel 1: Premium, central, foodie/culture/shopping vibe
+  const hotel1Tags: HotelTags = {
+    priceCategory: 'premium',
+    vibeMatch: ['foodie', 'culture', 'shopping'],
+    paceMatch: ['packed', 'moderate'],
+    locationVibe: 'central',
+    groupFit: ['solo', 'couple'],
+  };
+
+  // Hotel 2: Moderate, quiet-residential, relaxation/photography vibe
+  const hotel2Tags: HotelTags = {
+    priceCategory: 'moderate',
+    vibeMatch: ['relaxation', 'photography'],
+    paceMatch: ['relaxed', 'moderate'],
+    locationVibe: 'quiet-residential',
+    groupFit: ['family', 'small-group'],
+  };
+
+  // Hotel 3: Budget, central, adventure/culture vibe
+  const hotel3Tags: HotelTags = {
+    priceCategory: 'budget',
+    vibeMatch: ['adventure', 'culture'],
+    paceMatch: ['packed', 'moderate'],
+    locationVibe: 'central',
+    groupFit: ['solo', 'couple'],
+  };
+
+  const mockHotels = [
     {
       id: `hotel-${city}-1`,
-      name: `Grand ${city} Hotel`,
-      pricePerNight: 180,
-      rating: 4.5,
-      amenities: ['WiFi', 'Breakfast', 'Pool'],
+      name: `Old Town ${city} Suites`,
+      city,
+      pricePerNight: 220,
+      rating: 4.3,
+      amenities: ['WiFi', 'City Center', 'Rooftop Bar'],
+      exactMatch: true,
+      availableRoomTypes: ['Standard Room', 'Deluxe Room'],
+      availabilityStatus: 'available' as const,
+      availabilityConfidence: 'high' as const,
+      tags: hotel1Tags,
     },
     {
       id: `hotel-${city}-2`,
-      name: `${city} Central Inn`,
-      pricePerNight: 120,
-      rating: 4.0,
-      amenities: ['WiFi', 'Parking'],
+      name: `Grand ${city} Hotel`,
+      city,
+      pricePerNight: 165,
+      rating: 4.5,
+      amenities: ['WiFi', 'Breakfast', 'Pool', 'Family Friendly', 'Quiet Location'],
+      exactMatch: true,
+      availableRoomTypes: ['Standard Room', 'Deluxe Room', 'Family Suite'],
+      availabilityStatus: 'limited' as const,
+      availabilityConfidence: 'medium' as const,
+      availabilityReason: 'Popular property, only a few suites remaining for your dates',
+      tags: hotel2Tags,
     },
     {
       id: `hotel-${city}-3`,
-      name: `Boutique ${city} Lodge`,
-      pricePerNight: 90,
-      rating: 3.5,
-      amenities: ['WiFi'],
+      name: `${city} Central Inn`,
+      city,
+      pricePerNight: 85,
+      rating: 4.0,
+      amenities: ['WiFi', 'Parking', '24hr Reception'],
+      exactMatch: true,
+      availableRoomTypes: ['Standard Room', 'Twin Room'],
+      availabilityStatus: 'available' as const,
+      availabilityConfidence: 'high' as const,
+      restrictions: ['No family rooms - groups may need multiple bookings'],
+      tags: hotel3Tags,
     },
   ];
-
-  // Generate hotels with availability computed deterministically
-  const mockHotels = baseHotels.map((baseHotel, index) => {
-    const availability = computeAvailability(city, visit, baseHotel.name, index);
-    
-    // Adjust price based on priceSignal
-    let pricePerNight = baseHotel.pricePerNight;
-    if (availability.priceSignal === 'high') {
-      pricePerNight = Math.floor(pricePerNight * 1.3);
-    }
-    
-    return {
-      ...baseHotel,
-      city,
-      pricePerNight,
-      exactMatch: true, // MVP: All hotels fit itinerary exactly
-      ...availability,
-    };
-  });
 
   return mockHotels;
 }

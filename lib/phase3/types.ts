@@ -13,6 +13,14 @@
 import { StructuralRoute } from '@/lib/route-optimizer/types';
 import { Phase2StructuralRoute } from '@/lib/phase2/types';
 
+export interface HotelTags {
+  priceCategory: 'budget' | 'moderate' | 'premium' | 'luxury';
+  vibeMatch: Array<'adventure' | 'culture' | 'relaxation' | 'foodie' | 'photography' | 'shopping'>;
+  paceMatch: Array<'relaxed' | 'moderate' | 'packed'>;
+  locationVibe: 'central' | 'quiet-residential' | 'scenic-outskirts';
+  groupFit: Array<'solo' | 'couple' | 'small-group' | 'family'>;
+}
+
 export type HotelConstraint = {
   hotelId: string;
   city: string;
@@ -37,6 +45,23 @@ export type HotelSearchRequest = {
   };
 };
 
+export type Hotel = {
+  id: string;
+  name: string;
+  city: string;
+  pricePerNight?: number;
+  rating?: number;
+  amenities?: string[];
+  exactMatch?: boolean;
+  availabilityStatus: 'available' | 'limited' | 'unavailable';
+  availableRoomTypes?: string[];
+  restrictions?: string[];
+  priceSignal?: 'normal' | 'high';
+  availabilityConfidence: 'high' | 'medium' | 'low';
+  availabilityReason?: string;
+  tags?: HotelTags;
+};
+
 export type HotelSearchResponse = {
   tripId: string;
   hotelsByCity: Array<{
@@ -46,21 +71,7 @@ export type HotelSearchResponse = {
       departure: string;
       nights: number;
     };
-    hotels: Array<{
-      id: string;
-      name: string;
-      city: string;
-      pricePerNight?: number;
-      rating?: number;
-      amenities?: string[];
-      exactMatch?: boolean;
-      availabilityStatus: 'available' | 'limited' | 'unavailable';
-      availableRoomTypes?: string[];
-      restrictions?: string[];
-      priceSignal?: 'normal' | 'high';
-      availabilityConfidence: 'high' | 'medium' | 'low';
-      availabilityReason?: string;
-    }>;
+    hotels: Array<Hotel>;
   }>;
 };
 
@@ -95,17 +106,7 @@ export type HotelBookingResponse = {
   reason?: 'sold_out' | 'room_type_unavailable' | 'price_changed' | 'date_incompatible';
   alternatives?: {
     sameHotelRoomTypes?: string[];
-    nearbyHotels?: Array<{
-      id: string;
-      name: string;
-      city: string;
-      pricePerNight?: number;
-      rating?: number;
-      amenities?: string[];
-      availabilityStatus: 'available' | 'limited' | 'unavailable';
-      availabilityConfidence: 'high' | 'medium' | 'low';
-      availabilityReason?: string;
-    }>;
+    nearbyHotels?: Array<Hotel>;
   };
 };
 

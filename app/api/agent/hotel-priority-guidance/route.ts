@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { selectRelevantTensions, type UserProfile, type TensionResult } from '@/lib/phase3/hotelTradeoffRules';
+import type { HotelTags } from '@/lib/phase3/types';
+
+export type { TensionResult };
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -71,6 +75,22 @@ type HotelPriorityGuidanceRequest = {
   aggregatedFacts: AggregatedHotelFacts;
   meaningfulDifferences: MeaningfulDifferences;
   travelSignals: TravelSignals;
+  selectedPriority?: {
+    tensionId: string;
+    poleId: string;
+    selectedHotel: {
+      id: string;
+      name: string;
+      pricePerNight: number;
+      tags: HotelTags;
+    };
+  };
+  hotels?: Array<{
+    id: string;
+    name: string;
+    pricePerNight?: number;
+    tags?: HotelTags;
+  }>;
 };
 
 type HotelPriority = {
@@ -80,14 +100,67 @@ type HotelPriority = {
 };
 
 type HotelPriorityGuidanceResponse = {
-  brief: string;
-  priorities: HotelPriority[];
+  brief?: string;
+  priorities?: HotelPriority[];
+  tensionResults?: TensionResult[];
+  explanation?: string;
+  acceptedTradeoff?: string;
 };
 
 function buildSystemPrompt(
   meaningfulDifferences: MeaningfulDifferences,
-  travelSignals: TravelSignals
+  travelSignals: TravelSignals,
+  userProfile: UserProfile,
+  tensionResults: TensionResult[],
+  hotels?: Array<{ id: string; name: string; pricePerNight?: number; tags?: HotelTags }>,
+  selectedPriority?: {
+    tensionId: string;
+    poleId: string;
+    selectedHotel: {
+      id: string;
+      name: string;
+      pricePerNight: number;
+      tags: HotelTags;
+    };
+  }
 ): string {
+  // Explanation mode: user has selected a priority
+  if (selectedPriority) {
+    const tensionResult = tensionResults.find(t => t.dimension === selectedPriority.tensionId);
+    const poleLabel = tensionResult?.poleA.id === selectedPriority.poleId
+      ? tensionResult.poleA.label
+      : tensionResult?.poleB.id === selectedPriority.poleId
+      ? tensionResult.poleB.label
+      : selectedPriority.poleId;
+
+    return `You are WanderWise. The user just made a choice. Explain why this hotel is perfect for them.
+
+USER PROFILE:
+- Pace: ${userProfile.pace}
+- Interests: ${userProfile.interests.join(', ')}
+- Budget tier: ${userProfile.budget}
+- Group: ${userProfile.groupSize} people
+
+THEY CHOSE: ${selectedPriority.poleId} (${poleLabel})
+SELECTED HOTEL: ${selectedPriority.selectedHotel.name} at $${selectedPriority.selectedHotel.pricePerNight}/night
+HOTEL TAGS: ${JSON.stringify(selectedPriority.selectedHotel.tags)}
+
+Generate a personalized explanation (MAX 20-25 words) for why this hotel matches their choice. Reference their specific interests, pace, or group size. Also generate a short "accepted tradeoff" (MAX 15-20 words) acknowledging what they're giving up.
+
+OUTPUT JSON:
+{
+  "explanation": "string — MAX 20-25 words, simple phrase-like conversation",
+  "acceptedTradeoff": "string — MAX 15-20 words, what they're giving up"
+}
+
+RULES:
+- Keep it conversational and simple
+- No filler words
+- Be specific but brief
+- Reference their actual preferences naturally`;
+  }
+
+  // Normal mode: help user choose
   const activeDimensions = [
     meaningfulDifferences.fit && 'fit',
     meaningfulDifferences.comfort && 'comfort',
@@ -98,41 +171,61 @@ function buildSystemPrompt(
     .map((id) => `    { "id": "${id}", "label": string, "helper": string }`)
     .join(',\n');
 
-  return `You are WanderWise — a chill travel buddy helping someone pick hotels. Keep it short and casual.
+  // Build hotel summaries with tags
+  const hotelSummariesWithTags = hotels && hotels.length > 0
+    ? hotels.map(h => {
+        const price = h.pricePerNight ? `$${h.pricePerNight}/night` : 'Price TBD';
+        const tags = h.tags
+          ? `Tags: ${h.tags.priceCategory}, ${h.tags.vibeMatch.join('/')}, ${h.tags.locationVibe}, ${h.tags.groupFit.join('/')}`
+          : 'No tags';
+        return `- ${h.name} (${price}) - ${tags}`;
+      }).join('\n')
+    : 'Hotel details provided in aggregatedFacts';
 
-RULES:
-- You're NOT choosing hotels. Just helping them decide what matters.
-- Brief: MAX 2 sentences. No filler words. Super casual.
-- Priority pills: ONE sentence max each. Short and punchy.
+  // Get primary tension (first one)
+  const primaryTension = tensionResults.length > 0 ? tensionResults[0] : null;
 
-INPUT:
-- City, stay window, group size
-- Hotel comparison data (availability, confidence, room types, prices)
-- Only these dimensions differ: ${activeDimensions.join(', ')}
-- Travel signals: disruptionRisk=${travelSignals.disruptionRisk}, sellOutRisk=${travelSignals.sellOutRisk}, roomCompromiseRisk=${travelSignals.roomCompromiseRisk}
+  return `You are WanderWise — a travel buddy helping someone pick hotels.
 
-OUTPUT (JSON only):
+USER PROFILE:
+- Pace: ${userProfile.pace}
+- Interests: ${userProfile.interests.join(', ')}
+- Budget tier: ${userProfile.budget}
+- Group: ${userProfile.groupSize} people
+
+${primaryTension ? `RELEVANT TRADEOFF FOR THIS USER:
+${primaryTension.poleA.label} vs ${primaryTension.poleB.label}` : ''}
+
+HOTELS AVAILABLE:
+${hotelSummariesWithTags}
+
+Generate a brief (MAX 20-25 words) that frames this tradeoff specifically for this user's interests and pace. Then generate 2 priority pills.
+
+Reference their actual preferences naturally. For example:
+- If they're a foodie: mention walking to restaurants
+- If they're relaxed pace: mention sleeping in, no rush
+- If they're a family: mention kids, space, convenience
+
+OUTPUT JSON:
 {
-  "brief": "Max 2 sentences. Casual. WanderWise puns welcome.",
+  "brief": "string — MAX 20-25 words, simple phrase-like conversation",
   "priorities": [
-${prioritiesList || '    // Empty if <2 dimensions differ'}
+    { "id": "poleA-id", "label": "string", "helper": "string referencing user profile" },
+    { "id": "poleB-id", "label": "string", "helper": "string referencing user profile" }
   ]
 }
 
 BRIEF:
-- 2 sentences MAX
+- MAX 20-25 words
+- Simple phrase-like conversation
 - Super casual, no filler
-- Puns on "WanderWise" are appreciated (e.g., "Wander wisely", "wise choice")
-- Frame tradeoffs simply (dates, rooms, booking confidence)
+- Reference their specific interests, pace, or group size
+- Frame the tradeoff in terms they care about
 
 PRIORITY PILLS:
-- Label: Short, punchy (3-5 words max)
-- Helper: ONE sentence max. Casual. No filler.
-- Use these IDs: ${activeDimensions.map((id) => `"${id}"`).join(', ') || 'none'}
-
-Examples (don't copy):
-- Label: "Fit dates" → Helper: "Hotels that match your itinerary exactly."
-- Label: "Better rooms" → Helper: "Room types that work for your group."
+- Use the tension poles: "${primaryTension?.poleA.id || 'poleA'}" and "${primaryTension?.poleB.id || 'poleB'}"
+- Label: Short, punchy (3-5 words max) - use the pole labels
+- Helper: MAX 15-20 words. Reference their profile (pace, interests, group size)
 
 Be casual. Be brief. Be WanderWise.`;
 }
@@ -148,7 +241,91 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { meaningfulDifferences, travelSignals } = body;
+    // Build user profile from request
+    const groupSize = body.groupSize.adults + (body.groupSize.kids || 0);
+    const pace = (body.tripContext?.pace || 'moderate') as 'relaxed' | 'moderate' | 'packed';
+    const interests = body.tripContext?.interests || [];
+    
+    // Map budget from tripContext or default
+    let budget: 'budget' | 'moderate' | 'premium' | 'luxury' = 'moderate';
+    // Note: tripContext doesn't have budget, so we'll need to infer or default
+    // For now, we'll use a default. In production, this should come from tripState
+    
+    const userProfile: UserProfile = {
+      pace,
+      interests,
+      budget,
+      groupSize,
+    };
+
+    // Get relevant tensions
+    const tensionResults = selectRelevantTensions(userProfile);
+
+    const { meaningfulDifferences, travelSignals, selectedPriority, hotels } = body;
+
+    // Explanation mode: selectedPriority is provided
+    if (selectedPriority) {
+      const systemPromptContent = buildSystemPrompt(
+        meaningfulDifferences,
+        travelSignals,
+        userProfile,
+        tensionResults,
+        hotels,
+        selectedPriority
+      );
+
+      const userContent = JSON.stringify(
+        {
+          city: body.city,
+          stayWindow: body.stayWindow,
+          groupSize: body.groupSize,
+          tripContext: body.tripContext || {},
+          selectedPriority,
+        },
+        null,
+        2
+      );
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4.1',
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: systemPromptContent,
+          },
+          {
+            role: 'user',
+            content: userContent,
+          },
+        ],
+        temperature: 0.7,
+      });
+
+      const content = completion.choices[0]?.message?.content;
+      if (!content) {
+        throw new Error('Empty response from OpenAI');
+      }
+
+      let parsed: { explanation?: string; acceptedTradeoff?: string };
+      try {
+        parsed = JSON.parse(content);
+      } catch (err) {
+        throw new Error('Failed to parse AI guidance JSON');
+      }
+
+      // Validate explanation mode response
+      if (!parsed.explanation || typeof parsed.explanation !== 'string') {
+        throw new Error('Invalid guidance structure: explanation is required');
+      }
+      if (!parsed.acceptedTradeoff || typeof parsed.acceptedTradeoff !== 'string') {
+        throw new Error('Invalid guidance structure: acceptedTradeoff is required');
+      }
+
+      return NextResponse.json(parsed);
+    }
+
+    // Normal mode: help user choose
     const activeDimensions = [
       meaningfulDifferences.fit && 'fit',
       meaningfulDifferences.comfort && 'comfort',
@@ -164,7 +341,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Build dynamic system prompt based on which dimensions differ and travel signals
-    const systemPromptContent = buildSystemPrompt(meaningfulDifferences, travelSignals);
+    const systemPromptContent = buildSystemPrompt(
+      meaningfulDifferences,
+      travelSignals,
+      userProfile,
+      tensionResults,
+      hotels
+    );
 
     const userContent = JSON.stringify(
       {
@@ -175,6 +358,9 @@ export async function POST(request: NextRequest) {
         aggregatedFacts: body.aggregatedFacts,
         meaningfulDifferences: body.meaningfulDifferences,
         travelSignals: body.travelSignals,
+        userProfile,
+        tensionResults,
+        hotels: hotels || [],
       },
       null,
       2
@@ -218,24 +404,20 @@ export async function POST(request: NextRequest) {
       throw new Error('Invalid guidance structure: priorities must be an array');
     }
 
-    // Validate priorities match expected count and IDs
-    const expectedCount = activeDimensions.length;
+    // Validate priorities - now based on tension poles
+    const primaryTension = tensionResults.length > 0 ? tensionResults[0] : null;
     
-    // Special case: If only 1 dimension differs, AI should return empty priorities array
-    if (expectedCount === 1 && parsed.priorities.length === 0) {
-      // Valid: 1 dimension differs, empty priorities (brief only, no question)
-      // Continue without validating IDs
-    } else {
-      // Normal case: 2+ dimensions differ, must match expected count
-      if (parsed.priorities.length !== expectedCount) {
+    if (primaryTension) {
+      // Expect 2 priorities based on tension poles
+      if (parsed.priorities.length !== 2) {
         throw new Error(
-          `Invalid guidance structure: expected ${expectedCount} priorities, got ${parsed.priorities.length}`
+          `Invalid guidance structure: expected 2 priorities (tension poles), got ${parsed.priorities.length}`
         );
       }
 
-      // Validate that only expected IDs are present
+      // Validate that priorities match tension pole IDs
       const returnedIds = parsed.priorities.map((p) => p.id).sort();
-      const expectedIds = [...activeDimensions].sort();
+      const expectedIds = [primaryTension.poleA.id, primaryTension.poleB.id].sort();
       if (JSON.stringify(returnedIds) !== JSON.stringify(expectedIds)) {
         throw new Error(
           `Invalid guidance priorities: expected IDs [${expectedIds.join(', ')}], got [${returnedIds.join(', ')}]`
@@ -248,9 +430,45 @@ export async function POST(request: NextRequest) {
           throw new Error('Invalid priority structure: each priority must have id, label, and helper');
         }
       }
+    } else {
+      // No tension results - fallback to old system validation
+      const expectedCount = activeDimensions.length;
+      
+      // Special case: If only 1 dimension differs, AI should return empty priorities array
+      if (expectedCount === 1 && parsed.priorities.length === 0) {
+        // Valid: 1 dimension differs, empty priorities (brief only, no question)
+        // Continue without validating IDs
+      } else {
+        // Normal case: 2+ dimensions differ, must match expected count
+        if (parsed.priorities.length !== expectedCount) {
+          throw new Error(
+            `Invalid guidance structure: expected ${expectedCount} priorities, got ${parsed.priorities.length}`
+          );
+        }
+
+        // Validate that only expected IDs are present
+        const returnedIds = parsed.priorities.map((p) => p.id).sort();
+        const expectedIds = [...activeDimensions].sort();
+        if (JSON.stringify(returnedIds) !== JSON.stringify(expectedIds)) {
+          throw new Error(
+            `Invalid guidance priorities: expected IDs [${expectedIds.join(', ')}], got [${returnedIds.join(', ')}]`
+          );
+        }
+
+        // Validate each priority has required fields
+        for (const priority of parsed.priorities) {
+          if (!priority.id || !priority.label || !priority.helper) {
+            throw new Error('Invalid priority structure: each priority must have id, label, and helper');
+          }
+        }
+      }
     }
 
-    return NextResponse.json(parsed);
+    return NextResponse.json({
+      brief: parsed.brief,
+      priorities: parsed.priorities,
+      tensionResults: tensionResults, // Add this
+    });
   } catch (error) {
     console.error('[HotelPriorityGuidance] Error generating guidance', {
       error: error instanceof Error ? error.message : String(error),

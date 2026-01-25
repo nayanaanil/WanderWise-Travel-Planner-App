@@ -26,6 +26,8 @@ export type HotelOptionWithImpact = {
   availabilityConfidence: 'high' | 'medium' | 'low';
   // Optional impact cards from impact evaluation
   impactCards?: ImpactCard[];
+  // Optional hotel tags for preference-based selection
+  tags?: import('./types').HotelTags;
 };
 
 /**
@@ -429,7 +431,8 @@ export function resolveHotelSelectionByPriority(
   priority: 'fit' | 'comfort' | 'availability',
   hotels: HotelOptionWithImpact[],
   groupSize: number,
-  impactResults?: Map<string, { impactCards: ImpactCard[] }>
+  impactResults?: Map<string, { impactCards: ImpactCard[] }>,
+  originalPoleId?: string
 ): {
   hotelId: string;
   priorityUsed: 'fit' | 'comfort' | 'availability';
@@ -440,11 +443,31 @@ export function resolveHotelSelectionByPriority(
 
   if (priority === 'fit') {
     // Prefer hotels with exactMatch: true and no impact cards
+    // If originalPoleId is provided, use tags for location-based selection
     let bestHotel: HotelOptionWithImpact | null = null;
     let bestScore = Number.MAX_SAFE_INTEGER;
 
     for (const hotel of hotels) {
       let score = 0;
+
+      // Tag-based selection for location dimension
+      if (originalPoleId && hotel.tags) {
+        if (originalPoleId === 'central') {
+          // Prefer central location
+          if (hotel.tags.locationVibe === 'central') {
+            score -= 50; // Bonus for central location
+          } else if (hotel.tags.locationVibe === 'quiet-residential') {
+            score += 50; // Penalty for quiet (not central)
+          }
+        } else if (originalPoleId === 'quiet') {
+          // Prefer quiet-residential location
+          if (hotel.tags.locationVibe === 'quiet-residential') {
+            score -= 50; // Bonus for quiet location
+          } else if (hotel.tags.locationVibe === 'central') {
+            score += 50; // Penalty for central (not quiet)
+          }
+        }
+      }
 
       // Check exactMatch (false = requires adjustment, higher score = worse)
       if (hotel.exactMatch === false) {
@@ -490,6 +513,7 @@ export function resolveHotelSelectionByPriority(
     }
   } else if (priority === 'comfort') {
     // Prefer hotels with room types that best accommodate the group
+    // If originalPoleId is provided, use tags for differentiated comfort selection
     let bestHotel: HotelOptionWithImpact | null = null;
     let bestScore = -1; // Higher score = better
 
@@ -500,47 +524,102 @@ export function resolveHotelSelectionByPriority(
 
       let score = 0;
 
-      // Check room type suitability for group size
-      const hasSuite = hotel.availableRoomTypes.some(rt =>
-        rt.toLowerCase().includes('suite') ||
-        rt.toLowerCase().includes('family') ||
-        rt.toLowerCase().includes('apartment')
-      );
-      const hasDeluxe = hotel.availableRoomTypes.some(rt =>
-        rt.toLowerCase().includes('deluxe') ||
-        rt.toLowerCase().includes('superior')
-      );
-      const hasStandard = hotel.availableRoomTypes.some(rt =>
-        rt.toLowerCase().includes('standard') ||
-        rt.toLowerCase().includes('double')
-      );
-
-      // Score based on group size fit
-      if (groupSize >= 4) {
-        // Large groups need suites/family rooms
-        if (hasSuite) {
-          score = 100; // Perfect fit
-        } else if (hasDeluxe) {
-          score = 50; // May need multiple rooms
-        } else {
-          score = 0; // Won't fit well
+      // Tag-based selection for comfort dimension
+      if (originalPoleId && hotel.tags) {
+        if (originalPoleId === 'together') {
+          // Prefer hotels with family/small-group fit AND suites
+          const hasSuite = hotel.availableRoomTypes.some(rt =>
+            rt.toLowerCase().includes('suite') ||
+            rt.toLowerCase().includes('family') ||
+            rt.toLowerCase().includes('apartment')
+          );
+          const hasGroupFit = hotel.tags.groupFit.includes('family') || hotel.tags.groupFit.includes('small-group');
+          
+          if (hasGroupFit && hasSuite) {
+            score += 100; // Perfect match
+          } else if (hasGroupFit || hasSuite) {
+            score += 50; // Partial match
+          }
+        } else if (originalPoleId === 'separate') {
+          // Prefer budget hotels (cheaper for multiple rooms)
+          if (hotel.tags.priceCategory === 'budget') {
+            score += 100; // Budget preferred
+          } else if (hotel.tags.priceCategory === 'moderate') {
+            score += 50; // Moderate acceptable
+          } else {
+            score += 0; // Premium/luxury less ideal
+          }
+        } else if (originalPoleId === 'authentic') {
+          // Prefer premium hotels with fewer amenities (boutique feel)
+          if (hotel.tags.priceCategory === 'premium') {
+            score += 100; // Premium boutique
+          } else if (hotel.tags.priceCategory === 'moderate') {
+            score += 30; // Moderate acceptable
+          }
+          // Penalize hotels with too many amenities (less authentic)
+          const amenityCount = hotel.availableRoomTypes?.length || 0;
+          if (amenityCount > 3) {
+            score -= 20; // Too many amenities = less authentic
+          }
+        } else if (originalPoleId === 'reliable') {
+          // Prefer luxury/premium with most amenities
+          if (hotel.tags.priceCategory === 'luxury') {
+            score += 100; // Luxury preferred
+          } else if (hotel.tags.priceCategory === 'premium') {
+            score += 80; // Premium good
+          } else {
+            score += 20; // Lower tiers less ideal
+          }
+          // Bonus for more amenities (full-service)
+          const amenityCount = hotel.availableRoomTypes?.length || 0;
+          score += amenityCount * 10; // More amenities = more reliable
         }
-      } else if (groupSize >= 2) {
-        // Medium groups work with deluxe or suite
-        if (hasSuite) {
-          score = 100; // Excellent
-        } else if (hasDeluxe) {
-          score = 80; // Good
-        } else if (hasStandard) {
-          score = 40; // May be tight
-        }
-      } else {
-        // Solo travelers - any room type works
-        score = 100;
       }
 
-      // Bonus for more room type options (more flexibility)
-      score += hotel.availableRoomTypes.length * 5;
+      // Fallback to existing room type logic if tags are missing or no match
+      if (!originalPoleId || !hotel.tags || score === 0) {
+        // Check room type suitability for group size
+        const hasSuite = hotel.availableRoomTypes.some(rt =>
+          rt.toLowerCase().includes('suite') ||
+          rt.toLowerCase().includes('family') ||
+          rt.toLowerCase().includes('apartment')
+        );
+        const hasDeluxe = hotel.availableRoomTypes.some(rt =>
+          rt.toLowerCase().includes('deluxe') ||
+          rt.toLowerCase().includes('superior')
+        );
+        const hasStandard = hotel.availableRoomTypes.some(rt =>
+          rt.toLowerCase().includes('standard') ||
+          rt.toLowerCase().includes('double')
+        );
+
+        // Score based on group size fit
+        if (groupSize >= 4) {
+          // Large groups need suites/family rooms
+          if (hasSuite) {
+            score = 100; // Perfect fit
+          } else if (hasDeluxe) {
+            score = 50; // May need multiple rooms
+          } else {
+            score = 0; // Won't fit well
+          }
+        } else if (groupSize >= 2) {
+          // Medium groups work with deluxe or suite
+          if (hasSuite) {
+            score = 100; // Excellent
+          } else if (hasDeluxe) {
+            score = 80; // Good
+          } else if (hasStandard) {
+            score = 40; // May be tight
+          }
+        } else {
+          // Solo travelers - any room type works
+          score = 100;
+        }
+
+        // Bonus for more room type options (more flexibility)
+        score += hotel.availableRoomTypes.length * 5;
+      }
 
       if (score > bestScore) {
         bestScore = score;
@@ -561,6 +640,7 @@ export function resolveHotelSelectionByPriority(
     }
   } else if (priority === 'availability') {
     // Prefer hotels with highest confidence and available status
+    // If originalPoleId is provided, use tags for price-based selection
     let bestHotel: HotelOptionWithImpact | null = null;
     let bestScore = -1; // Higher score = better
 
@@ -572,20 +652,64 @@ export function resolveHotelSelectionByPriority(
 
       let score = 0;
 
-      // Confidence score (high = 3, medium = 2, low = 1)
-      if (hotel.availabilityConfidence === 'high') {
-        score = 30;
-      } else if (hotel.availabilityConfidence === 'medium') {
-        score = 20;
-      } else {
-        score = 10;
+      // Tag-based selection for price dimension
+      if (originalPoleId && hotel.tags) {
+        if (originalPoleId === 'save') {
+          // Prefer budget hotels
+          if (hotel.tags.priceCategory === 'budget') {
+            score += 100; // Budget preferred
+          } else if (hotel.tags.priceCategory === 'moderate') {
+            score += 50; // Moderate acceptable
+          } else {
+            score += 0; // Premium/luxury less ideal
+          }
+        } else if (originalPoleId === 'spend') {
+          // Prefer premium/luxury hotels
+          if (hotel.tags.priceCategory === 'luxury') {
+            score += 100; // Luxury preferred
+          } else if (hotel.tags.priceCategory === 'premium') {
+            score += 80; // Premium good
+          } else if (hotel.tags.priceCategory === 'moderate') {
+            score += 30; // Moderate acceptable
+          } else {
+            score += 0; // Budget less ideal
+          }
+        }
       }
 
-      // Status score (available = 10, limited = 5)
-      if (hotel.availabilityStatus === 'available') {
-        score += 10;
-      } else if (hotel.availabilityStatus === 'limited') {
-        score += 5;
+      // Fallback to existing availability confidence logic if tags are missing
+      if (!originalPoleId || !hotel.tags || score === 0) {
+        // Confidence score (high = 30, medium = 20, low = 10)
+        if (hotel.availabilityConfidence === 'high') {
+          score = 30;
+        } else if (hotel.availabilityConfidence === 'medium') {
+          score = 20;
+        } else {
+          score = 10;
+        }
+
+        // Status score (available = 10, limited = 5)
+        if (hotel.availabilityStatus === 'available') {
+          score += 10;
+        } else if (hotel.availabilityStatus === 'limited') {
+          score += 5;
+        }
+      } else {
+        // If using tags, still factor in availability confidence
+        if (hotel.availabilityConfidence === 'high') {
+          score += 30;
+        } else if (hotel.availabilityConfidence === 'medium') {
+          score += 20;
+        } else {
+          score += 10;
+        }
+
+        // Status score (available = 10, limited = 5)
+        if (hotel.availabilityStatus === 'available') {
+          score += 10;
+        } else if (hotel.availabilityStatus === 'limited') {
+          score += 5;
+        }
       }
 
       if (score > bestScore) {

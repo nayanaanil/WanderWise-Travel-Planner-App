@@ -434,10 +434,10 @@ function resolveSelectionByPriority(
       if (cheapestOutbound && cheapestInbound) {
         // Check if this combination is excluded
         if (!isExcluded(bestGateway.id, cheapestOutbound.id, cheapestInbound.id)) {
-          return {
-            gatewayId: bestGateway.id,
-            outboundFlightId: cheapestOutbound.id,
-            inboundFlightId: cheapestInbound.id,
+        return {
+          gatewayId: bestGateway.id,
+          outboundFlightId: cheapestOutbound.id,
+          inboundFlightId: cheapestInbound.id,
             priorityUsed: 'price',
           };
         }
@@ -560,12 +560,12 @@ function resolveSelectionByPriority(
       if (earliestInbound && bestOutbound) {
         // Check if this combination is excluded
         if (!isExcluded(bestGateway.id, bestOutbound.id, earliestInbound.id)) {
-          return {
-            gatewayId: bestGateway.id,
-            outboundFlightId: bestOutbound.id,
-            inboundFlightId: earliestInbound.id,
-            priorityUsed: 'arrival',
-          };
+        return {
+          gatewayId: bestGateway.id,
+          outboundFlightId: bestOutbound.id,
+          inboundFlightId: earliestInbound.id,
+          priorityUsed: 'arrival',
+        };
         }
       }
     }
@@ -718,10 +718,10 @@ function resolveSelectionByPriority(
       if (bestOutbound && bestInbound) {
         // Check if this combination is excluded
         if (!isExcluded(bestGateway.id, bestOutbound.id, bestInbound.id)) {
-          return {
-            gatewayId: bestGateway.id,
-            outboundFlightId: bestOutbound.id,
-            inboundFlightId: bestInbound.id,
+        return {
+          gatewayId: bestGateway.id,
+          outboundFlightId: bestOutbound.id,
+          inboundFlightId: bestInbound.id,
             priorityUsed: 'layover',
           };
         }
@@ -1367,9 +1367,15 @@ export function FlightOptionsResultsScreen({
     inboundFlightId: string;
     priorityUsed: 'price' | 'arrival' | 'layover';
   } | null>(null);
+  const [aiExplanation, setAiExplanation] = useState<{
+    explanation: string;
+    acceptedTradeoff: string;
+  } | null>(null);
   const [encouragementMessage, setEncouragementMessage] = useState<string | null>(null);
   const [agentSuccessCount, setAgentSuccessCount] = useState(0);
   const [shouldShowWatchfulMsg, setShouldShowWatchfulMsg] = useState(false);
+  // Store original payload for explanation API call
+  const [originalPayload, setOriginalPayload] = useState<any>(null);
 
   // Load agent success count on mount and check if watchful message should be shown
   useEffect(() => {
@@ -1554,6 +1560,7 @@ export function FlightOptionsResultsScreen({
         tripContext: {
           pace,
           interests,
+          budget: tripState.budgetType?.toLowerCase() || 'moderate',
           travelers: {
             adults,
             kids,
@@ -1574,6 +1581,9 @@ export function FlightOptionsResultsScreen({
           sleepDisruptionRisk: travelSignals.sleepDisruptionRisk,
         },
       };
+
+      // Store payload for later use in explanation API call
+      setOriginalPayload(payload);
 
       fetch('/api/agent/flight-priority-guidance', {
         method: 'POST',
@@ -1644,7 +1654,7 @@ export function FlightOptionsResultsScreen({
               });
             } else {
               // All distinct, show full guidance
-              setFlightPriorityGuidance(data);
+            setFlightPriorityGuidance(data);
             }
           }
         })
@@ -1668,24 +1678,87 @@ export function FlightOptionsResultsScreen({
   useEffect(() => {
     if (!selectedFlightPriority || gatewayOptions.length === 0) {
       setAgentResolvedSelection(null);
+      setAiExplanation(null);
       return;
     }
 
     // Use pre-resolved selection if available, otherwise resolve on demand
     const preResolved = resolvedFlightsByPriority.get(selectedFlightPriority);
+    let resolved: {
+      gatewayId: string;
+      outboundFlightId: string;
+      inboundFlightId: string;
+      priorityUsed: 'price' | 'arrival' | 'layover';
+    } | null;
+    
     if (preResolved) {
+      resolved = preResolved;
       setAgentResolvedSelection(preResolved);
       // Auto-expand the resolved gateway so user can see the flights
       setExpandedGatewayId(preResolved.gatewayId);
     } else {
       // Fallback: resolve on demand (shouldn't happen if pre-resolution worked)
-      const resolved = resolveSelectionByPriority(selectedFlightPriority, gatewayOptions);
+      resolved = resolveSelectionByPriority(selectedFlightPriority, gatewayOptions);
       setAgentResolvedSelection(resolved);
       if (resolved) {
         setExpandedGatewayId(resolved.gatewayId);
       }
     }
-  }, [selectedFlightPriority, gatewayOptions, resolvedFlightsByPriority]);
+
+    // Make second API call for explanation if we have a resolved selection and original payload
+    if (resolved && originalPayload) {
+      const resolvedGateway = gatewayOptions.find(g => g.id === resolved.gatewayId);
+      const resolvedOutbound = resolvedGateway?.outbound.flights.find(f => f.id === resolved.outboundFlightId);
+      const resolvedInbound = resolvedGateway?.inbound.flights.find(f => f.id === resolved.inboundFlightId);
+
+      if (resolvedGateway && resolvedOutbound && resolvedInbound) {
+        // Use outbound flight for explanation (or could combine both)
+        const selectedFlight = resolvedOutbound;
+        
+        fetch('/api/agent/flight-priority-guidance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...originalPayload,
+            selectedPriority: {
+              priorityId: selectedFlightPriority,
+              selectedFlight: {
+                airline: selectedFlight.airline || selectedFlight.airlineName || 'Multiple Airlines',
+                price: selectedFlight.price || 0,
+                departureTime: selectedFlight.departureTime || '',
+                arrivalTime: selectedFlight.arrivalTime || '',
+                stops: selectedFlight.stops || 0,
+                totalDuration: selectedFlight.duration || '',
+              },
+            },
+          }),
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              console.error('[FlightExplanation] Failed to fetch explanation', res.status);
+              return null;
+            }
+            return await res.json();
+          })
+          .then((data) => {
+            if (data && data.explanation && data.acceptedTradeoff) {
+              setAiExplanation({
+                explanation: data.explanation,
+                acceptedTradeoff: data.acceptedTradeoff,
+              });
+            } else {
+              // Fallback to template-based explanation
+              setAiExplanation(null);
+            }
+          })
+          .catch((err) => {
+            console.error('[FlightExplanation] Failed to fetch explanation', err);
+            // Fallback to template-based explanation
+            setAiExplanation(null);
+          });
+      }
+    }
+  }, [selectedFlightPriority, gatewayOptions, resolvedFlightsByPriority, originalPayload]);
 
   const handleGatewaySelect = (gatewayId: string) => {
     if (selectedGatewayId === gatewayId) {
@@ -2003,11 +2076,11 @@ export function FlightOptionsResultsScreen({
                     <button
                       key={priority.id}
                       type="button"
-                      onClick={() =>
-                        setSelectedFlightPriority(
-                          selectedFlightPriority === priority.id ? null : priority.id
-                        )
-                      }
+                      onClick={() => {
+                        const newPriority = selectedFlightPriority === priority.id ? null : priority.id;
+                        setSelectedFlightPriority(newPriority);
+                        setAiExplanation(null); // Clear previous explanation while new one loads
+                      }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
                         isSelected
                           ? 'bg-[#FE4C40] text-white border-[#FE4C40]'
@@ -2034,11 +2107,19 @@ export function FlightOptionsResultsScreen({
 
               const outboundTimeInfo = formatFlightTimeDisplay(resolvedOutbound, resolvedGateway.outbound.date);
               const inboundTimeInfo = formatFlightTimeDisplay(resolvedInbound, resolvedGateway.inbound.date);
-              const explanation = generateRecommendationExplanation(
+              
+              // Show loading state when explanation is being fetched
+              const isLoadingExplanation = !aiExplanation;
+              
+              // Use AI-generated explanation if available, otherwise fallback to template
+              const templateExplanation = generateRecommendationExplanation(
                 agentResolvedSelection.priorityUsed,
                 resolvedOutbound,
                 resolvedInbound
               );
+              
+              const explanationText = aiExplanation?.explanation || templateExplanation.mainBenefit;
+              const tradeoffText = aiExplanation?.acceptedTradeoff || templateExplanation.acceptedTradeoff;
 
               const priorityLabel = flightPriorityGuidance?.priorities.find(p => p.id === agentResolvedSelection.priorityUsed)?.label || agentResolvedSelection.priorityUsed;
 
@@ -2085,10 +2166,27 @@ export function FlightOptionsResultsScreen({
                     </button>
                   </div>
 
-                  <p className="text-xs text-[#6B7280] italic mb-3">
-                    Chosen because you prioritized <span className="font-medium text-[#1F2937]">{priorityLabel.toLowerCase()}</span>. 
-                    This gives you {explanation.mainBenefit}, with {explanation.acceptedTradeoff}.
-                  </p>
+                  {isLoadingExplanation ? (
+                    <div className="flex items-center gap-2 py-2 mb-3">
+                      <div className="w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-xs text-[#6B7280] italic">Thinking...</p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[#6B7280] italic mb-3">
+                      {aiExplanation ? (
+                        <>
+                          {aiExplanation.explanation}
+                          <br />
+                          <span className="mt-1 block">Accepted tradeoff: {aiExplanation.acceptedTradeoff}</span>
+                        </>
+                      ) : (
+                        <>
+                          Chosen because you prioritized <span className="font-medium text-[#1F2937]">{priorityLabel.toLowerCase()}</span>. 
+                          This gives you {explanationText}, with {tradeoffText}.
+                        </>
+                      )}
+                    </p>
+                  )}
 
                   <button
                     type="button"

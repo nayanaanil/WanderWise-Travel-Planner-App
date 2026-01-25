@@ -8,6 +8,7 @@ const openai = new OpenAI({
 type TripContext = {
   pace?: string;
   interests?: string[];
+  budget?: string;
   travelers: {
     adults: number;
     kids: number;
@@ -57,6 +58,17 @@ type FlightPriorityGuidanceRequest = {
   aggregatedFacts: AggregatedFlightFacts;
   differentiators: Differentiators;
   travelSignals: TravelSignals;
+  selectedPriority?: {
+    priorityId: 'price' | 'arrival' | 'layover';
+    selectedFlight: {
+      airline: string;
+      price: number;
+      departureTime: string;
+      arrivalTime: string;
+      stops: number;
+      totalDuration: string;
+    };
+  };
 };
 
 type FlightPriority = {
@@ -66,61 +78,113 @@ type FlightPriority = {
 };
 
 type FlightPriorityGuidanceResponse = {
-  brief: string;
-  priorities: FlightPriority[];
+  brief?: string;
+  priorities?: FlightPriority[];
+  explanation?: string;
+  acceptedTradeoff?: string;
 };
 
 function buildSystemPrompt(
+  tripContext: TripContext,
+  aggregatedFacts: AggregatedFlightFacts,
   differentiators: Differentiators,
-  travelSignals: TravelSignals
+  travelSignals: TravelSignals,
+  selectedPriority?: FlightPriorityGuidanceRequest['selectedPriority']
 ): string {
+  // Explanation mode: user has selected a priority
+  if (selectedPriority) {
+    const { priorityId, selectedFlight } = selectedPriority;
+    
+    return `You are WanderWise. The user just picked their flight priority. Explain why this flight matches their choice.
+
+USER PROFILE:
+- Pace: ${tripContext.pace || 'moderate'}
+- Budget tier: ${tripContext.budget || 'moderate'}
+- Group: ${tripContext.travelers.adults} adults, ${tripContext.travelers.kids} kids
+- Trip length: ${tripContext.tripDurationDays || 'N/A'} days
+
+THEY CHOSE: ${priorityId}
+SELECTED FLIGHT:
+- Airline: ${selectedFlight.airline}
+- Price: $${selectedFlight.price}
+- Departure: ${selectedFlight.departureTime}
+- Arrival: ${selectedFlight.arrivalTime}
+- Stops: ${selectedFlight.stops}
+- Total duration: ${selectedFlight.totalDuration}
+
+Generate a personalized explanation (MAX 20-25 words) for why this flight matches their priority. Reference their pace, budget, or group size naturally. Also generate a short "accepted tradeoff" (MAX 15-20 words) acknowledging what they're giving up.
+
+OUTPUT (JSON):
+{
+  "explanation": "string — personalized, reference their profile, MAX 20-25 words",
+  "acceptedTradeoff": "string — what they're giving up, MAX 15-20 words"
+}
+
+Be specific. Reference their actual situation. No generic advice.`;
+  }
+
+  // Normal mode: help user choose
   const activeDimensions = [
     differentiators.price && 'price',
     differentiators.arrival && 'arrival',
     differentiators.layover && 'layover',
   ].filter(Boolean) as Array<'price' | 'arrival' | 'layover'>;
 
-  const prioritiesList = activeDimensions
-    .map((id) => `    { "id": "${id}", "label": string, "helper": string }`)
-    .join(',\n');
+  // Format arrival pattern
+  const arrivalPatternText = aggregatedFacts.arrivalPatterns?.mostlyMorning 
+    ? 'mostly morning' 
+    : aggregatedFacts.arrivalPatterns?.mostlyLateNight 
+    ? 'mostly late night' 
+    : 'mixed';
 
   return `You are WanderWise — a chill travel buddy helping someone pick flights. Keep it short and casual.
 
-RULES:
-- You're NOT choosing flights. Just helping them decide what matters.
-- Brief: MAX 2 sentences. No filler words. Super casual.
-- Priority pills: ONE sentence max each. Short and punchy.
+USER PROFILE:
+- Pace: ${tripContext.pace || 'moderate'}
+- Interests: ${tripContext.interests?.join(', ') || 'general travel'}
+- Budget tier: ${tripContext.budget || 'moderate'}
+- Group: ${tripContext.travelers.adults} adults, ${tripContext.travelers.kids} kids
+- Trip length: ${tripContext.tripDurationDays} days
 
-INPUT:
-- Trip context (pace, travelers, trip length)
-- Flight comparison data (travel time, layovers, arrival times, prices)
-- Only these dimensions differ: ${activeDimensions.join(', ')}
-- Travel signals: firstDayUsability=${travelSignals.firstDayUsability}, connectionAnxiety=${travelSignals.connectionAnxiety}, sleepDisruptionRisk=${travelSignals.sleepDisruptionRisk}
+FLIGHT OPTIONS SUMMARY:
+- Price range: $${aggregatedFacts.priceRange?.min || 'N/A'} - $${aggregatedFacts.priceRange?.max || 'N/A'}
+- Travel time range: ${aggregatedFacts.totalTravelTimeRangeMinutes?.min || 'N/A'}-${aggregatedFacts.totalTravelTimeRangeMinutes?.max || 'N/A'} minutes
+- Layover pattern: ${aggregatedFacts.layoverPatterns?.typicalStops || 'mixed'}
+- Arrival pattern: ${arrivalPatternText}
+
+TRAVEL SIGNALS:
+- First day usability: ${travelSignals.firstDayUsability}
+- Connection anxiety: ${travelSignals.connectionAnxiety}
+- Sleep disruption risk: ${travelSignals.sleepDisruptionRisk}
+
+DIMENSIONS THAT DIFFER: ${activeDimensions.join(', ')}
+
+YOUR JOB:
+Generate a brief (2 sentences max) and priority pills that reference the user's specific situation.
+
+PERSONALIZATION RULES:
+- If budget='budget': emphasize savings, mention "more money for experiences"
+- If budget='luxury': emphasize comfort, mention "you're not here to suffer"
+- If pace='packed': emphasize arrival time, mention "maximize your first day"
+- If pace='relaxed': emphasize smooth journey, mention "no rush, arrive refreshed"
+- If kids > 0: emphasize layover comfort, mention "easier with little ones"
+- If tripDurationDays <= 5: emphasize arrival, mention "every hour counts on a short trip"
+- If tripDurationDays >= 10: emphasize price, mention "savings add up on longer trips"
 
 OUTPUT (JSON only):
 {
-  "brief": "Max 2 sentences. Casual. WanderWise puns welcome.",
+  "brief": "string — reference their pace or budget naturally, max 2 sentences",
   "priorities": [
-${prioritiesList || '    // Empty if <2 dimensions differ'}
+    { "id": "price" | "arrival" | "layover", "label": "string 3-5 words", "helper": "string referencing user profile" }
   ]
 }
 
-BRIEF:
-- 2 sentences MAX
-- Super casual, no filler
-- Puns on "WanderWise" are appreciated (e.g., "Wander wisely", "wise choice")
-- Frame tradeoffs simply (energy, time, money)
+EXAMPLES:
+- Budget traveler, packed pace: "You want to hit the ground running without breaking the bank. Here's the tradeoff."
+- Luxury traveler, relaxed pace: "No need to suffer through bad connections. The question is how much comfort is worth to you."
+- Family with kids: "Layovers with kids are no joke. Let's find you something manageable."
 
-PRIORITY PILLS:
-- Label: Short, punchy (3-5 words max)
-- Helper: ONE sentence max. Casual. No filler.
-- Use these IDs: ${activeDimensions.map((id) => `"${id}"`).join(', ') || 'none'}
-
-Examples (don't copy):
-- Label: "Save money" → Helper: "Cheaper flights, might take longer."
-- Label: "Arrive fresh" → Helper: "Land early, hit the ground running."
-
-Be casual. Be brief. Be WanderWise.`;
+Be specific. Reference their actual situation. No generic advice.`;
 }
 
 export async function POST(request: NextRequest) {
@@ -134,15 +198,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { differentiators, travelSignals } = body;
-    const activeDimensions = [
-      differentiators.price && 'price',
-      differentiators.arrival && 'arrival',
-      differentiators.layover && 'layover',
-    ].filter(Boolean) as Array<'price' | 'arrival' | 'layover'>;
+    const { tripContext, aggregatedFacts, differentiators, travelSignals, selectedPriority } = body;
 
-    // Build dynamic system prompt based on which dimensions differ and travel signals
-    const systemPromptContent = buildSystemPrompt(differentiators, travelSignals);
+    // Build dynamic system prompt based on user profile, flight facts, dimensions, and travel signals
+    const systemPromptContent = buildSystemPrompt(
+      tripContext,
+      aggregatedFacts,
+      differentiators,
+      travelSignals,
+      selectedPriority
+    );
 
     const userContent = JSON.stringify(
       {
@@ -150,6 +215,7 @@ export async function POST(request: NextRequest) {
         aggregatedFacts: body.aggregatedFacts,
         differentiators: body.differentiators,
         travelSignals: body.travelSignals,
+        selectedPriority: body.selectedPriority,
       },
       null,
       2
@@ -183,15 +249,34 @@ export async function POST(request: NextRequest) {
       throw new Error('Failed to parse AI guidance JSON');
     }
 
-    // Validate brief exists
+    // Explanation mode: validate explanation and acceptedTradeoff
+    if (selectedPriority) {
+      if (!parsed.explanation || typeof parsed.explanation !== 'string') {
+        throw new Error('Invalid guidance structure: explanation is required in explanation mode');
+      }
+      if (!parsed.acceptedTradeoff || typeof parsed.acceptedTradeoff !== 'string') {
+        throw new Error('Invalid guidance structure: acceptedTradeoff is required in explanation mode');
+      }
+      return NextResponse.json({
+        explanation: parsed.explanation,
+        acceptedTradeoff: parsed.acceptedTradeoff,
+      });
+    }
+
+    // Normal mode: validate brief and priorities
     if (!parsed.brief || typeof parsed.brief !== 'string') {
       throw new Error('Invalid guidance structure: brief is required');
     }
 
-    // Validate priorities array exists
     if (!Array.isArray(parsed.priorities)) {
       throw new Error('Invalid guidance structure: priorities must be an array');
     }
+
+    const activeDimensions = [
+      differentiators.price && 'price',
+      differentiators.arrival && 'arrival',
+      differentiators.layover && 'layover',
+    ].filter(Boolean) as Array<'price' | 'arrival' | 'layover'>;
 
     // Validate priorities match expected count and IDs
     const expectedCount = activeDimensions.length;
@@ -225,7 +310,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json(parsed);
+    return NextResponse.json({
+      brief: parsed.brief,
+      priorities: parsed.priorities,
+    });
   } catch (error) {
     console.error('[FlightPriorityGuidance] Error generating guidance', {
       error: error instanceof Error ? error.message : String(error),

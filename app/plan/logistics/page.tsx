@@ -179,10 +179,12 @@ export default function LogisticsPage() {
   const [showScrollIndicator, setShowScrollIndicator] = useState(true);
   // Store activities as plain object: { [date: string]: { day?: Activity, night?: Activity } }
   type Activity = { id: string; name: string; timeSlot: TimeSlot; duration?: number; activityName?: string };
+  // Special marker for "leave slot free" - uses a special ID to identify it
+  type ActivityOrFreeMarker = Activity | { id: '__leave_free__'; name: string; timeSlot: TimeSlot };
   type DayActivities = {
     [date: string]: {
-      day?: Activity;
-      night?: Activity;
+      day?: ActivityOrFreeMarker;
+      night?: ActivityOrFreeMarker;
     };
   };
   // Initialize from sessionStorage to persist across remounts
@@ -598,6 +600,48 @@ export default function LogisticsPage() {
         
         return;
       }
+    }
+    
+    // Handle "leave slot free" marker
+    const leaveSlotFree = params.get('leaveSlotFree');
+    const freeSlotDate = params.get('freeSlotDate');
+    const freeSlotName = params.get('freeSlotName');
+    
+    if (leaveSlotFree === 'true' && freeSlotDate && freeSlotName) {
+      // Clear URL params immediately
+      window.history.replaceState({}, '', window.location.pathname);
+      
+      // Store a special marker for "leave slot free"
+      setDayActivities(prev => {
+        const existingDay = prev[freeSlotDate] || {};
+        const slotKey = freeSlotName as 'day' | 'night';
+        const timeSlotForStorage: TimeSlot = freeSlotName as TimeSlot;
+        
+        const freeMarker: ActivityOrFreeMarker = {
+          id: '__leave_free__',
+          name: 'Relax! Have some down time',
+          timeSlot: timeSlotForStorage,
+        };
+        
+        return {
+          ...prev,
+          [freeSlotDate]: {
+            ...existingDay,
+            [slotKey]: freeMarker,
+          },
+        };
+      });
+      
+      // Scroll to the day after a short delay
+      setTimeout(() => {
+        const dayElement = document.getElementById(`day-${freeSlotDate}`);
+        if (dayElement) {
+          dayElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setExpandedDayId(`day-${freeSlotDate}`);
+        }
+      }, 100);
+      
+      return;
     }
     
     // Standard single-activity actions
@@ -2125,11 +2169,12 @@ export default function LogisticsPage() {
             const slots = getSlotsForPace(pace);
             
             // Prepare existing activities data for URL params (slots are optional properties now)
+            // Exclude "leave free" markers from existing activities
             const existingActivitiesForParam = [
               activitiesForDay.day,
               activitiesForDay.night,
             ]
-              .filter((a): a is Activity => a !== undefined)
+              .filter((a): a is Activity => a !== undefined && a.id !== '__leave_free__')
               .map(a => ({
                 id: a.id,
                 name: a.name,
@@ -2143,12 +2188,36 @@ export default function LogisticsPage() {
               const activity = activitiesForDay[slotName as 'day' | 'night'];
               
               if (activity) {
-                // Render scheduled activity card with slot name (for correct 'night' label)
-                dayCards.push(
-                  <div key={`${date}-activity-${slotName}-${activity.id}`}>
-                    {renderScheduledActivityCard(activity, slotName, date)}
-                  </div>
-                );
+                // Check if this is the "leave free" marker
+                if (activity.id === '__leave_free__') {
+                  // Render placeholder card for "leave free" (still clickable to add activity if user changes mind)
+                  const slotLabel = slotName.charAt(0).toUpperCase() + slotName.slice(1);
+                  const slotTimeForAPI = slotName as TimeSlot;
+                  dayCards.push(
+                    <div
+                      key={`${date}-leave-free-${slotName}`}
+                      className="w-full bg-gray-100 border-2 border-gray-200 rounded-xl p-4 cursor-pointer hover:bg-gray-200 transition-colors"
+                      onClick={() => {
+                        // Navigate to activities selection page if user wants to add an activity
+                        router.push(`/activities/select?city=${encodeURIComponent(cityName)}&day=${encodeURIComponent(date)}&slot=${slotName}&slotTime=${slotTimeForAPI}&existing=${existingActivitiesParam}`);
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="text-xs text-gray-500 mb-1">{slotLabel}</div>
+                          <p className="text-sm text-gray-600 font-medium">{activity.name}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                } else {
+                  // Render scheduled activity card with slot name (for correct 'night' label)
+                  dayCards.push(
+                    <div key={`${date}-activity-${slotName}-${activity.id}`}>
+                      {renderScheduledActivityCard(activity, slotName, date)}
+                    </div>
+                  );
+                }
               } else {
                 // Render empty slot card with label
                 const slotLabel = slotName.charAt(0).toUpperCase() + slotName.slice(1); // Capitalize first letter

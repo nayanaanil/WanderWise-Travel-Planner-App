@@ -17,6 +17,7 @@ import { computeHotelMeaningfulDifferencesForCity, shouldProceedWithAI, aggregat
 import { HotelSearchResponse } from '@/lib/phase3/types';
 import { getEncouragementMessage, trackAgentDecisionSuccess, getAgentDecisionSuccessCount, getWatchfulMessage, shouldShowWatchfulMessage, markWatchfulMessageAsShown } from '@/lib/agentEncouragement';
 import { AgentEncouragementMessage } from '@/components/AgentEncouragementMessage';
+import type { TensionResult } from '@/lib/phase3/hotelTradeoffRules';
 
 /**
  * Phase 3 Hotel Selection Page
@@ -56,11 +57,17 @@ function HotelOptionsPageContent() {
       helper: string;
     }>;
   } | null>(null);
-  const [selectedHotelPriority, setSelectedHotelPriority] = useState<'fit' | 'comfort' | 'availability' | null>(null);
+  const [tensionResults, setTensionResults] = useState<TensionResult[] | null>(null);
+  const [selectedHotelPriority, setSelectedHotelPriority] = useState<string | null>(null);
   const [showPriorityGuidance, setShowPriorityGuidance] = useState(false);
   const [agentResolvedHotelSelection, setAgentResolvedHotelSelection] = useState<{
     hotelId: string;
     priorityUsed: 'fit' | 'comfort' | 'availability';
+    originalPriorityId?: string; // Store the original tension pole ID
+  } | null>(null);
+  const [aiExplanation, setAiExplanation] = useState<{
+    explanation: string;
+    acceptedTradeoff: string;
   } | null>(null);
   const [encouragementMessage, setEncouragementMessage] = useState<string | null>(null);
   const [agentSuccessCount, setAgentSuccessCount] = useState(0);
@@ -308,7 +315,9 @@ function HotelOptionsPageContent() {
     
     if (!selectedCityData || !selectedCityData.hotels || selectedCityData.hotels.length === 0) {
       setHotelPriorityGuidance(null);
+      setTensionResults(null);
       setAgentResolvedHotelSelection(null);
+      setAiExplanation(null);
       return;
     }
 
@@ -340,6 +349,7 @@ function HotelOptionsPageContent() {
         availableRoomTypes: hotel.availableRoomTypes,
         availabilityStatus: hotel.availabilityStatus,
         availabilityConfidence: hotel.availabilityConfidence,
+        tags: hotel.tags, // Include tags
       }));
       const travelSignals = aggregateHotelTravelSignals(hotelsWithImpact, groupSize);
       
@@ -347,6 +357,7 @@ function HotelOptionsPageContent() {
       const tripContext = {
         pace: tripState.pace,
         interests: tripState.styles,
+        budget: tripState.budgetType?.toLowerCase() || 'moderate',
         travelers: {
           adults: tripState.adults || 1,
           kids: tripState.kids || 0,
@@ -365,6 +376,12 @@ function HotelOptionsPageContent() {
         aggregatedFacts,
         meaningfulDifferences,
         travelSignals,
+        hotels: hotels.map((hotel: any) => ({
+          id: hotel.id,
+          name: hotel.name,
+          pricePerNight: hotel.pricePerNight,
+          tags: hotel.tags,
+        })),
       };
       
       fetch('/api/agent/hotel-priority-guidance', {
@@ -379,13 +396,21 @@ function HotelOptionsPageContent() {
         .then((data) => {
           if (data && data.brief && typeof data.brief === 'string' && Array.isArray(data.priorities)) {
             setHotelPriorityGuidance(data);
+            // Store tension results if provided
+            if (data.tensionResults && Array.isArray(data.tensionResults)) {
+              setTensionResults(data.tensionResults);
+            } else {
+              setTensionResults(null);
+            }
           } else {
             setHotelPriorityGuidance(null);
+            setTensionResults(null);
           }
         })
         .catch((err) => {
           console.error('[HotelPriorityGuidance] Failed to fetch guidance', err);
           setHotelPriorityGuidance(null);
+          setTensionResults(null);
         });
     } catch (err) {
       console.error('[HotelPriorityGuidance] Failed to prepare guidance payload', err);
@@ -393,6 +418,31 @@ function HotelOptionsPageContent() {
       setAgentResolvedHotelSelection(null);
     }
   }, [isHydrated, hotelSearchResults, selectedCityIndex]);
+
+  /**
+   * Maps tension pole IDs to legacy priority IDs for compatibility with resolveHotelSelectionByPriority
+   */
+  function mapTensionPoleToLegacyPriority(poleId: string): 'fit' | 'comfort' | 'availability' {
+    const mapping: Record<string, 'fit' | 'comfort' | 'availability'> = {
+      // Location dimension → fit (matches itinerary/location)
+      'central': 'fit',
+      'quiet': 'fit',
+      // Space dimension → comfort (room comfort)
+      'together': 'comfort',
+      'separate': 'comfort',
+      // Price dimension → availability (booking/price)
+      'save': 'availability',
+      'spend': 'availability',
+      // Vibe dimension → comfort (amenities/experience)
+      'authentic': 'comfort',
+      'reliable': 'comfort',
+      // Legacy IDs pass through
+      'fit': 'fit',
+      'comfort': 'comfort',
+      'availability': 'availability',
+    };
+    return mapping[poleId] || 'fit';
+  }
 
   // Resolve hotel selection when priority is selected
   useEffect(() => {
@@ -421,19 +471,29 @@ function HotelOptionsPageContent() {
         availableRoomTypes: hotel.availableRoomTypes,
         availabilityStatus: hotel.availabilityStatus,
         availabilityConfidence: hotel.availabilityConfidence,
+        tags: hotel.tags, // Include tags for preference-based selection
       }));
       
-      // Resolve hotel selection
+      // Map tension pole ID to legacy priority for resolveHotelSelectionByPriority
+      const legacyPriority = mapTensionPoleToLegacyPriority(selectedHotelPriority);
+      
+      // Resolve hotel selection (pass original pole ID for tag-based selection)
       const resolved = resolveHotelSelectionByPriority(
-        selectedHotelPriority,
+        legacyPriority,
         hotelsWithImpact,
-        groupSize
+        groupSize,
+        undefined, // impactResults
+        selectedHotelPriority // originalPoleId
       );
       
       if (resolved) {
-        setAgentResolvedHotelSelection(resolved);
+        // Store original priority ID (tension pole) along with legacy priority
+        setAgentResolvedHotelSelection({
+          ...resolved,
+          originalPriorityId: selectedHotelPriority,
+        });
         
-        // Store in tripState
+        // Store in tripState (keep legacy format for compatibility)
         const existingResolved = tripState.agentResolvedHotelSelection || {};
         saveTripState({
           agentResolvedHotelSelection: {
@@ -441,8 +501,106 @@ function HotelOptionsPageContent() {
             [selectedCityData.city]: resolved,
           },
         });
+
+        // Find the resolved hotel
+        const resolvedHotel = hotels.find((h: any) => h.id === resolved.hotelId);
+        
+        if (resolvedHotel && resolvedHotel.tags) {
+          // Get the selected priority pill to find tension dimension and pole
+          const selectedPriorityPill = hotelPriorityGuidance?.priorities.find(
+            p => p.id === selectedHotelPriority
+          );
+          
+          if (selectedPriorityPill && hotelPriorityGuidance) {
+            // Compute required data for explanation API call
+            const aggregatedFacts = aggregateHotelFacts(hotels);
+            const meaningfulDifferences = computeHotelMeaningfulDifferencesForCity(
+              hotelSearchResults as HotelSearchResponse,
+              selectedCityData.city
+            );
+            const travelSignals = aggregateHotelTravelSignals(hotelsWithImpact, groupSize);
+            
+            // Find which tension/pole the user selected based on the priority ID they clicked
+            const selectedTension = tensionResults?.find(t => 
+              t.poleA.id === selectedHotelPriority || t.poleB.id === selectedHotelPriority
+            );
+            
+            const selectedPriority = {
+              tensionId: selectedTension?.dimension || 'location',
+              poleId: selectedHotelPriority, // This is now the actual pole ID from the tension
+              selectedHotel: {
+                id: resolvedHotel.id,
+                name: resolvedHotel.name,
+                pricePerNight: resolvedHotel.pricePerNight || 0,
+                tags: resolvedHotel.tags,
+              },
+            };
+            
+            // Make second API call for explanation
+            const originalPayload = {
+              city: selectedCityData.city,
+              stayWindow: selectedCityData.stayWindow,
+              groupSize: {
+                adults: tripState.adults || 1,
+                kids: tripState.kids || 0,
+              },
+              tripContext: {
+                pace: tripState.pace,
+                interests: tripState.styles,
+                budget: tripState.budgetType?.toLowerCase() || 'moderate',
+                travelers: {
+                  adults: tripState.adults || 1,
+                  kids: tripState.kids || 0,
+                },
+                tripDurationDays: tripState.structuralRoute?.derived?.totalTripDays,
+              },
+              aggregatedFacts,
+              meaningfulDifferences,
+              travelSignals,
+              hotels: hotels.map((h: any) => ({
+                id: h.id,
+                name: h.name,
+                pricePerNight: h.pricePerNight,
+                tags: h.tags,
+              })),
+            };
+
+            fetch('/api/agent/hotel-priority-guidance', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...originalPayload,
+                selectedPriority,
+              }),
+            })
+              .then(async (res) => {
+                if (!res.ok) {
+                  console.error('[HotelExplanation] Failed to fetch explanation', res.status);
+                  return null;
+                }
+                return await res.json();
+              })
+              .then((data) => {
+                if (data && data.explanation && data.acceptedTradeoff) {
+                  setAiExplanation({
+                    explanation: data.explanation,
+                    acceptedTradeoff: data.acceptedTradeoff,
+                  });
+                } else {
+                  // Fallback to template-based explanation
+                  setAiExplanation(null);
+                }
+              })
+              .catch((err) => {
+                console.error('[HotelExplanation] Failed to fetch explanation', err);
+                // Fallback to template-based explanation
+                setAiExplanation(null);
+              });
+          }
+        }
       } else {
         setAgentResolvedHotelSelection(null);
+        setAiExplanation(null);
       }
     } catch (err) {
       console.error('[HotelResolution] Failed to resolve hotel selection', err);
@@ -1012,11 +1170,11 @@ function HotelOptionsPageContent() {
                         <button
                           key={priority.id}
                           type="button"
-                          onClick={() =>
-                            setSelectedHotelPriority(
-                              selectedHotelPriority === priority.id ? null : priority.id
-                            )
-                          }
+                          onClick={() => {
+                            const newPriority = selectedHotelPriority === priority.id ? null : priority.id;
+                            setSelectedHotelPriority(newPriority);
+                            setAiExplanation(null); // Clear previous explanation while new one loads
+                          }}
                           className={`w-full text-left px-3 py-2 rounded-lg text-sm border transition-colors ${
                             isSelected
                               ? 'bg-[#FE4C40] text-white border-[#FE4C40]'
@@ -1039,10 +1197,18 @@ function HotelOptionsPageContent() {
                     return null;
                   }
 
-                  const { explanation, acceptedTradeoff } = generateHotelRecommendationExplanation(
+                  // Show loading state when explanation is being fetched
+                  const isLoadingExplanation = !aiExplanation;
+
+                  // Use AI-generated explanation if available, otherwise fallback to template
+                  const explanation = aiExplanation?.explanation || generateHotelRecommendationExplanation(
                     agentResolvedHotelSelection.priorityUsed,
                     resolvedHotel
-                  );
+                  ).explanation;
+                  const acceptedTradeoff = aiExplanation?.acceptedTradeoff || generateHotelRecommendationExplanation(
+                    agentResolvedHotelSelection.priorityUsed,
+                    resolvedHotel
+                  ).acceptedTradeoff;
 
                   return (
                     <div className="mt-4 pt-4 border-t border-orange-200">
@@ -1052,12 +1218,21 @@ function HotelOptionsPageContent() {
                       </div>
                       <div className="bg-white rounded-lg p-3 border border-orange-200 mb-3">
                         <div className="font-medium text-[#1F2937] mb-2">{resolvedHotel.name}</div>
-                        <p className="text-sm text-[#4B5563] mb-2 leading-relaxed">
-                          {explanation}
-                        </p>
-                        <p className="text-xs text-[#6B7280] italic">
-                          Accepted tradeoff: {acceptedTradeoff}
-                        </p>
+                        {isLoadingExplanation ? (
+                          <div className="flex items-center gap-2 py-2">
+                            <div className="w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin"></div>
+                            <p className="text-sm text-[#6B7280] italic">Thinking...</p>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-sm text-[#4B5563] mb-2 leading-relaxed">
+                              {explanation}
+                            </p>
+                            <p className="text-xs text-[#6B7280] italic">
+                              Accepted tradeoff: {acceptedTradeoff}
+                            </p>
+                          </>
+                        )}
                       </div>
                       <button
                         onClick={() => !loading && handleHotelClick(resolvedHotel, selectedCityData)}
